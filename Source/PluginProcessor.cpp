@@ -351,6 +351,13 @@ void HFXAudioProcessor::setStateInformation(const void* data, int size)
         apvts.replaceState(juce::ValueTree::fromXml(*xml));
 }
 
+
+juce::AudioProcessorEditor* HFXAudioProcessor::createEditor()
+{
+    return new HFXAudioProcessorEditor(*this);
+}
+
+
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new HFXAudioProcessor();
