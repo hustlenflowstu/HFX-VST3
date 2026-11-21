@@ -12,7 +12,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(JUCE)
 
-juce_add_plugin(HFX
+juce_add_plugin(HFX)
     COMPANY_NAME "Hustle N Flow"
     BUNDLE_ID com.hustlenflow.hfx
     PLUGIN_MANUFACTURER_CODE HnFl
@@ -27,6 +27,7 @@ juce_add_plugin(HFX
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
     COPY_PLUGIN_AFTER_BUILD FALSE
 )
+juce_generate_juce_header(HFX)
 
 target_sources(HFX PRIVATE
     Source/PluginProcessor.cpp
