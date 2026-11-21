@@ -28,22 +28,6 @@ CloseApplications=no
 Source: "{#PluginSource}\\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Code]
-function InitializeSetup(): Boolean;
-var
-  PluginPath: String;
-begin
-  PluginPath := ExpandConstant('{#PluginSource}');
-  if not DirExists(PluginPath) then
-  begin
-    MsgBox('The compiled HFX.vst3 plugin was not found.' + #13#10 + #13#10 +
-      'Please build HFX first by running BUILD_HFX_WINDOWS.bat, then run this installer builder again.',
-      mbCriticalError, MB_OK);
-    Result := False;
-    Exit;
-  end;
-  Result := True;
-end;
-
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
