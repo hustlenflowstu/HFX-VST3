@@ -8,8 +8,10 @@ class HFXSpectrumView final : public juce::Component
 public:
     explicit HFXSpectrumView(HFXAudioProcessor& p) : processor(p) {}
     void paint(juce::Graphics& g) override;
+    void setDisplayMode(int mode) noexcept { displayMode = mode; repaint(); }
 private:
     HFXAudioProcessor& processor;
+    int displayMode = 0;
 };
 
 class HFXAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
@@ -34,6 +36,7 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment;
     HFXSpectrumView spectrumView;
     int activeTab = 0;
+    int lastPresetMode = -1;
 
     const std::array<std::array<const char*, 4>, 5> ids {{
         {{ "eqFreq", "eqGain", "eqQ", "eqFreq" }},
@@ -54,6 +57,7 @@ private:
     void rebuildAttachments();
     void timerCallback() override;
     void applyPreset(int);
+    void refreshPresetChoices();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(HFXAudioProcessorEditor)
 };
