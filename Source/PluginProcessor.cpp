@@ -194,11 +194,12 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
             const float ceiling = juce::Decibels::decibelsToGain(pCeiling->load());
             const float targetGain = std::abs(x) > ceiling ? ceiling / juce::jmax(0.000001f, std::abs(x)) : 1.0f;
             const float limitReleaseMs = pLimitRelease->load();
-            const float releaseCoeff = std::exp(-1.0f / (0.001f * limitReleaseMs * (float)sampleRateHz));
+            const float limiterReleaseCoeff = std::exp(-1.0f / (0.001f * limitReleaseMs * (float)sampleRateHz));
             if (targetGain < limiterGain[(size_t)c])
                 limiterGain[(size_t)c] = targetGain;
             else
-                limiterGain[(size_t)c] = releaseCoeff * limiterGain[(size_t)c] + (1.0f - releaseCoeff) * targetGain;
+                limiterGain[(size_t)c] = limiterReleaseCoeff * limiterGain[(size_t)c]
+                                       + (1.0f - limiterReleaseCoeff) * targetGain;
             x *= limiterGain[(size_t)c];
             d[n] = x;
         }
