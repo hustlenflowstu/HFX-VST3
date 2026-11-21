@@ -12,7 +12,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(JUCE)
 
-juce_add_plugin(HFX)
+juce_add_plugin(HFX
     COMPANY_NAME "Hustle N Flow"
     BUNDLE_ID com.hustlenflow.hfx
     PLUGIN_MANUFACTURER_CODE HnFl
