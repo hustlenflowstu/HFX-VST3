@@ -15,7 +15,7 @@ void HFXSpectrumView::paint(juce::Graphics& g)
     const int bins = 160;
     for (int i = 0; i < bins; ++i)
     {
-        const int sourceBin = juce::jlimit(0, 511, (int)std::pow((double)i / (bins - 1), 2.0) * 511.0);
+        const int sourceBin = juce::jlimit(0, 511, static_cast<int>(std::pow(static_cast<double>(i) / static_cast<double>(bins - 1), 2.0) * 511.0));
         const float v = processor.spectrumAt(sourceBin);
         const float x = r.getX() + r.getWidth() * (float)i / (float)(bins - 1);
         const float y = r.getBottom() - v * r.getHeight() * 0.88f;
