@@ -1,0 +1,34 @@
+
+name: Build HFX VST3 and Windows Installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure HFX
+        run: cmake -S . -B build -A x64
+
+      - name: Build VST3
+        run: cmake --build build --config Release --target HFX_VST3
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Create Installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" HFX_Installer.iss
+
+      - name: Upload HFX Installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: HFX-Setup-Windows-x64
+          path: installer_output/HFX_Setup_1.0.0_x64.exe
