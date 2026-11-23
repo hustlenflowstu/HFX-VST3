@@ -36,6 +36,11 @@ HFXAudioProcessor::HFXAudioProcessor()
     pEqFreq = apvts.getRawParameterValue("eqFreq");
     pEqGain = apvts.getRawParameterValue("eqGain");
     pEqQ = apvts.getRawParameterValue("eqQ");
+    for (int band = 0; band < 5; ++band)
+    {
+        pEqBandFreq[(size_t)band] = apvts.getRawParameterValue("eqBandFreq" + juce::String(band));
+        pEqBandGain[(size_t)band] = apvts.getRawParameterValue("eqBandGain" + juce::String(band));
+    }
     pThreshold = apvts.getRawParameterValue("threshold");
     pRatio = apvts.getRawParameterValue("ratio");
     pAttack = apvts.getRawParameterValue("attack");
@@ -60,7 +65,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout HFXAudioProcessor::makeParam
 {
     using namespace juce;
     std::vector<std::unique_ptr<RangedAudioParameter>> params;
-    auto f = [&params](const char* id, const char* name, NormalisableRange<float> range,
+    auto f = [&params](String id, String name, NormalisableRange<float> range,
                        float initial, const char* unit = "")
     {
         params.push_back(std::make_unique<AudioParameterFloat>(
@@ -71,6 +76,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout HFXAudioProcessor::makeParam
     f("eqFreq", "EQ Frequency", { 30.0f, 18000.0f, 1.0f, 0.35f }, 250.0f, "Hz");
     f("eqGain", "EQ Gain", { -18.0f, 18.0f, 0.1f }, 0.0f, "dB");
     f("eqQ", "EQ Q", { 0.2f, 8.0f, 0.01f }, 1.0f);
+    const float bandHz[5] { 80.0f, 250.0f, 1000.0f, 5000.0f, 12000.0f };
+    const char* bandNames[5] { "Low", "Low Mid", "Mid", "High Mid", "High" };
+    for (int band = 0; band < 5; ++band)
+    {
+        const auto suffix = String(band);
+        f("eqBandFreq" + suffix, String(bandNames[band]) + " Frequency", { 20.0f, 20000.0f, 1.0f, 0.35f }, bandHz[band], "Hz");
+        f("eqBandGain" + suffix, String(bandNames[band]) + " Gain", { -18.0f, 18.0f, 0.1f }, 0.0f, "dB");
+    }
     f("threshold", "Threshold", { -60.0f, 0.0f, 0.1f }, -18.0f, "dB");
     f("ratio", "Ratio", { 1.0f, 20.0f, 0.1f }, 4.0f, ":1");
     f("attack", "Attack", { 0.1f, 100.0f, 0.1f }, 12.0f, "ms");
@@ -101,8 +114,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout HFXAudioProcessor::makeParam
 void HFXAudioProcessor::prepareToPlay(double sr, int)
 {
     sampleRateHz = sr;
-    for (int c = 0; c < 2; ++c)
-        eq[(size_t)c].reset();
+    for (auto& channel : eq)
+        for (auto& filter : channel) filter.reset();
     compEnvelope = { 0.0f, 0.0f };
     limiterGain = { 1.0f, 1.0f };
     lowState = { 0.0f, 0.0f };
@@ -111,13 +124,18 @@ void HFXAudioProcessor::prepareToPlay(double sr, int)
     delayBuffer.clear();
     delayWrite = 0;
     for (auto& bin : spectrum) bin.store(0.0f);
+    for (auto& v : waveformHistory) v.store(0.0f);
+    for (auto& v : scopeXHistory) v.store(0.0f);
+    for (auto& v : scopeYHistory) v.store(0.0f);
+    visualWrite.store(0);
     fftWrite = 0;
     updateParameters();
 }
 
 void HFXAudioProcessor::releaseResources()
 {
-    for (auto& filter : eq) filter.reset();
+    for (auto& channel : eq)
+        for (auto& filter : channel) filter.reset();
 }
 
 bool HFXAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
@@ -130,7 +148,8 @@ bool HFXAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 void HFXAudioProcessor::updateParameters()
 {
     for (int c = 0; c < 2; ++c)
-        eq[(size_t)c].setPeak(sampleRateHz, pEqFreq->load(), pEqQ->load(), pEqGain->load());
+        for (int band = 0; band < 5; ++band)
+            eq[(size_t)c][(size_t)band].setPeak(sampleRateHz, pEqBandFreq[(size_t)band]->load(), 0.85f, pEqBandGain[(size_t)band]->load());
 }
 
 void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -143,6 +162,22 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
 
     pushSpectrum(buffer);
     analyzeAutoMix(buffer);
+    // Capture the incoming waveform and stereo image for the editor.
+    {
+        const int nSamples = buffer.getNumSamples();
+        const auto* inL = buffer.getReadPointer(0);
+        const auto* inR = buffer.getNumChannels() > 1 ? buffer.getReadPointer(1) : inL;
+        int write = visualWrite.load(std::memory_order_relaxed);
+        for (int n = 0; n < nSamples; ++n)
+        {
+            const int slot = write++ % visualSize;
+            const float l = inL[n], r = inR[n];
+            waveformHistory[(size_t)slot].store(0.5f * (l + r), std::memory_order_relaxed);
+            scopeXHistory[(size_t)slot].store(0.5f * (l - r), std::memory_order_relaxed);
+            scopeYHistory[(size_t)slot].store(0.5f * (l + r), std::memory_order_relaxed);
+        }
+        visualWrite.store(write, std::memory_order_release);
+    }
 
     if (pBypass->load() > 0.5f)
         return;
@@ -171,7 +206,8 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
         for (int n = 0; n < samples; ++n)
         {
             float x = d[n] * inGain;
-            x = eq[(size_t)c].process(x);
+            for (int band = 0; band < 5; ++band)
+                x = eq[(size_t)c][(size_t)band].process(x);
 
             // Smooth peak-envelope compressor. Attack/release coefficients are
             // calculated from the controls and sample rate without allocating.
@@ -282,6 +318,37 @@ void HFXAudioProcessor::pushSpectrum(const juce::AudioBuffer<float>& b)
 float HFXAudioProcessor::spectrumAt(int i) const noexcept
 {
     return (i >= 0 && i < fftSize / 2) ? spectrum[(size_t)i].load(std::memory_order_relaxed) : 0.0f;
+}
+
+float HFXAudioProcessor::eqBandFrequency(int band) const noexcept
+{
+    return (band >= 0 && band < 5) ? pEqBandFreq[(size_t)band]->load(std::memory_order_relaxed) : 1000.0f;
+}
+
+float HFXAudioProcessor::eqBandGain(int band) const noexcept
+{
+    return (band >= 0 && band < 5) ? pEqBandGain[(size_t)band]->load(std::memory_order_relaxed) : 0.0f;
+}
+
+float HFXAudioProcessor::waveformAt(int index) const noexcept
+{
+    const int write = visualWrite.load(std::memory_order_acquire);
+    const int slot = (write - visualSize + index + visualSize * 2) % visualSize;
+    return waveformHistory[(size_t)slot].load(std::memory_order_relaxed);
+}
+
+float HFXAudioProcessor::scopeXAt(int index) const noexcept
+{
+    const int write = visualWrite.load(std::memory_order_acquire);
+    const int slot = (write - visualSize + index + visualSize * 2) % visualSize;
+    return scopeXHistory[(size_t)slot].load(std::memory_order_relaxed);
+}
+
+float HFXAudioProcessor::scopeYAt(int index) const noexcept
+{
+    const int write = visualWrite.load(std::memory_order_acquire);
+    const int slot = (write - visualSize + index + visualSize * 2) % visualSize;
+    return scopeYHistory[(size_t)slot].load(std::memory_order_relaxed);
 }
 
 void HFXAudioProcessor::requestAutoMix() noexcept

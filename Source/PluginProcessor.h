@@ -40,6 +40,15 @@ public:
     MixResult takeAutoMixResult() noexcept;
 
     float spectrumAt(int index) const noexcept;
+    float eqBandFrequency(int band) const noexcept;
+    float eqBandGain(int band) const noexcept;
+    float waveformAt(int index) const noexcept;
+    float scopeXAt(int index) const noexcept;
+    float scopeYAt(int index) const noexcept;
+    float compressorThresholdDb() const noexcept { return pThreshold->load(); }
+    float compressorRatio() const noexcept { return pRatio->load(); }
+    float saturationDriveDb() const noexcept { return pDrive->load(); }
+    float limiterCeilingDb() const noexcept { return pCeiling->load(); }
     float leftPeakDb() const noexcept { return leftPeak.load(); }
     float rightPeakDb() const noexcept { return rightPeak.load(); }
     float outputRmsDb() const noexcept { return outputRms.load(); }
@@ -55,7 +64,9 @@ private:
         float process(float x) noexcept;
         void reset() noexcept { z1 = z2 = 0.0f; }
     };
-    std::array<Biquad, 2> eq;
+    std::array<std::array<Biquad, 5>, 2> eq;
+    std::array<std::atomic<float>*, 5> pEqBandFreq {};
+    std::array<std::atomic<float>*, 5> pEqBandGain {};
     std::array<float, 2> compEnvelope { 0.0f, 0.0f };
     std::array<float, 2> limiterGain { 1.0f, 1.0f };
     juce::AudioBuffer<float> delayBuffer;
@@ -95,6 +106,11 @@ private:
     int fftWrite = 0;
     std::array<std::atomic<float>, fftSize / 2> spectrum {};
     std::atomic<int> spectrumVersion { 0 };
+    static constexpr int visualSize = 512;
+    std::array<std::atomic<float>, visualSize> waveformHistory {};
+    std::array<std::atomic<float>, visualSize> scopeXHistory {};
+    std::array<std::atomic<float>, visualSize> scopeYHistory {};
+    std::atomic<int> visualWrite { 0 };
 
     std::atomic<bool> autoMixRequested { false };
     std::atomic<bool> autoMixResetPending { false };

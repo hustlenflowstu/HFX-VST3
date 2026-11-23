@@ -29,9 +29,9 @@ private:
     juce::ComboBox trackMode, stemRole, presetBox;
     juce::TextButton autoMix { "AUTO-MIX" }, bypass { "BYPASS" };
     std::array<juce::TextButton, 5> tabs;
-    std::array<juce::Slider, 4> knobs;
-    std::array<juce::Label, 4> knobLabels;
-    std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>, 4> attachments;
+    std::array<juce::Slider, 10> knobs;
+    std::array<juce::Label, 10> knobLabels;
+    std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>, 10> attachments;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> stemRoleAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment;
@@ -39,19 +39,19 @@ private:
     int activeTab = 0;
     int lastPresetMode = -1;
 
-    const std::array<std::array<const char*, 4>, 5> ids {{
-        {{ "eqFreq", "eqGain", "eqQ", "eqFreq" }},
-        {{ "threshold", "ratio", "attack", "release" }},
-        {{ "drive", "tone", "warmth", "satMix" }},
-        {{ "width", "pan", "monoFreq", "haasMs" }},
-        {{ "inputGain", "ceiling", "limitRelease", "inputGain" }}
+    const std::array<std::array<const char*, 10>, 5> ids {{
+        {{ "eqBandFreq0", "eqBandFreq1", "eqBandFreq2", "eqBandFreq3", "eqBandFreq4", "eqBandGain0", "eqBandGain1", "eqBandGain2", "eqBandGain3", "eqBandGain4" }},
+        {{ "threshold", "ratio", "attack", "release", "threshold", "threshold", "ratio", "attack", "release", "threshold" }},
+        {{ "drive", "tone", "warmth", "satMix", "drive", "drive", "tone", "warmth", "satMix", "drive" }},
+        {{ "width", "pan", "monoFreq", "haasMs", "width", "width", "pan", "monoFreq", "haasMs", "width" }},
+        {{ "inputGain", "ceiling", "limitRelease", "inputGain", "ceiling", "inputGain", "ceiling", "limitRelease", "inputGain", "ceiling" }}
     }};
-    const std::array<std::array<const char*, 4>, 5> names {{
-        {{ "FREQ", "GAIN", "Q", "DYNAMIC" }},
-        {{ "THRESHOLD", "RATIO", "ATTACK", "RELEASE" }},
-        {{ "DRIVE", "TONE", "WARMTH", "MIX" }},
-        {{ "WIDTH", "PAN", "MONO MAKER", "HAAS / DELAY" }},
-        {{ "INPUT GAIN", "CEILING", "RELEASE", "TRANSIENT" }}
+    const std::array<std::array<const char*, 10>, 5> names {{
+        {{ "LOW FREQ", "LOW-MID FREQ", "MID FREQ", "HIGH-MID FREQ", "HIGH FREQ", "LOW GAIN", "LOW-MID GAIN", "MID GAIN", "HIGH-MID GAIN", "HIGH GAIN" }},
+        {{ "THRESHOLD", "RATIO", "ATTACK", "RELEASE", "KNEE", "THRESHOLD", "RATIO", "ATTACK", "RELEASE", "KNEE" }},
+        {{ "DRIVE", "TONE", "WARMTH", "MIX", "OUTPUT", "DRIVE", "TONE", "WARMTH", "MIX", "OUTPUT" }},
+        {{ "WIDTH", "PAN", "MONO MAKER", "HAAS / DELAY", "BALANCE", "WIDTH", "PAN", "MONO MAKER", "HAAS / DELAY", "BALANCE" }},
+        {{ "INPUT GAIN", "CEILING", "RELEASE", "TRANSIENT", "OUTPUT", "INPUT GAIN", "CEILING", "RELEASE", "TRANSIENT", "OUTPUT" }}
     }};
 
     void selectTab(int);
