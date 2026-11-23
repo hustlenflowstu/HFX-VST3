@@ -36,10 +36,12 @@ public:
 
     void requestAutoMix() noexcept;
     bool autoMixReady() const noexcept { return resultReady.load(std::memory_order_acquire); }
-    struct MixResult { float eqGain, threshold, drive, width, inputGain, rmsDb, crestDb; };
+    struct MixResult { float eqGain, threshold, drive, width, inputGain, rmsDb, crestDb; float eqLow, eqLowMid, eqMid, eqHighMid, eqHigh; };
     MixResult takeAutoMixResult() noexcept;
 
     float spectrumAt(int index) const noexcept;
+    float spectrumAtFrequency(float hz) const noexcept;
+    void setEqBandFromGraph(int band, float frequencyHz, float gainDb);
     float eqBandFrequency(int band) const noexcept;
     float eqBandGain(int band) const noexcept;
     float waveformAt(int index) const noexcept;
@@ -98,7 +100,7 @@ private:
 
     std::atomic<float> leftPeak { -90.0f }, rightPeak { -90.0f }, outputRms { -90.0f };
 
-    static constexpr int fftOrder = 10;
+    static constexpr int fftOrder = 12;
     static constexpr int fftSize = 1 << fftOrder;
     juce::dsp::FFT fft { fftOrder };
     juce::dsp::WindowingFunction<float> window { fftSize, juce::dsp::WindowingFunction<float>::hann };
@@ -117,10 +119,13 @@ private:
     std::atomic<bool> resultReady { false };
     double analysisCount = 0.0;
     double analysisSquares = 0.0;
+    double analysisLowSquares = 0.0, analysisMidSquares = 0.0, analysisHighSquares = 0.0;
+    std::array<float, 2> analysisLowState { 0.0f, 0.0f }, analysisHighState { 0.0f, 0.0f };
     float analysisPeak = 0.0f;
     std::atomic<float> resultEq { 0.0f }, resultThreshold { -18.0f };
     std::atomic<float> resultDrive { 2.0f }, resultWidth { 1.0f };
     std::atomic<float> resultInput { 0.0f }, resultRms { -24.0f }, resultCrest { 12.0f };
+    std::array<std::atomic<float>, 5> resultEqBands { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
 
     void updateParameters();
     void pushSpectrum(const juce::AudioBuffer<float>& buffer);

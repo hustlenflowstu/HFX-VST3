@@ -3,12 +3,64 @@
 namespace
 {
     constexpr int panelModeCount = 5;
-    const juce::StringArray vocalPresets {
-        "Clean Vocal", "Warm Studio Lead", "Modern Rap Lead", "Melodic Rap", "Airy R&B", "Bright Pop", "Wide Adlibs", "Aggressive Vocal"
-    };
-    const juce::StringArray beatPresets {
-        "Modern Trap", "Drill Punch", "Punchy 808", "Boom Bap Glue", "Warm R&B Beat", "Lo-Fi Texture", "Afro Bounce", "Clean Instrumental"
-    };
+    const juce::StringArray vocalPresets = []
+    {
+        juce::StringArray a;
+        const char* groups[5][10] = {
+            {"Rap - Clean Punch", "Rap - Forward Lead", "Rap - Aggressive Bite", "Rap - Dry Close Mic", "Rap - Dark Chest", "Rap - Bright Cut", "Rap - Thick Doubled", "Rap - Tight Modern", "Rap - Grit Texture", "Rap - Radio Lead"},
+            {"Melody - Smooth Tune", "Melody - Hard Tune", "Melody - Airy Tune", "Melody - Emotional Lead", "Melody - Wide Hook", "Melody - Bright Top", "Melody - Soft Tune", "Melody - Dark Tune", "Melody - Layer Stack", "Melody - Modern Pop Rap"},
+            {"R&B - Silky Lead", "R&B - Warm Intimate", "R&B - Breath Control", "R&B - Velvet Smooth", "R&B - Wide Harmony", "R&B - Soft Air", "R&B - Rich Chest", "R&B - Late Night", "R&B - Clean Studio", "R&B - Gloss Lead"},
+            {"Pop - Radio Bright", "Pop - Clean Center", "Pop - Airy Lead", "Pop - Punchy Lead", "Pop - Soft Focus", "Pop - Wide Chorus", "Pop - Intimate Verse", "Pop - Gloss Vocal", "Pop - Modern Stack", "Pop - Anthem Lead"},
+            {"FX - Telephone", "FX - Megaphone", "FX - Lo-Fi Vocal", "FX - Radio Distort", "FX - Whisper Air", "FX - Formant Color", "FX - Wide Doubler", "FX - Throw Delay", "FX - Dark Reverb", "FX - Creative Crush"}
+        };
+        for (const auto& group : groups) for (auto* name : group) a.add(name);
+        return a;
+    }();
+    const juce::StringArray beatPresets = []
+    {
+        juce::StringArray a;
+        const char* groups[5][10] = {
+            {"Kick - Deep Trap", "Kick - Punch Attack", "Kick - Tight Short", "Kick - Warm Round", "Kick - Hard Clip", "Kick - Sub Focus", "Kick - Modern Knock", "Kick - Dry Studio", "Kick - Heavy Impact", "Kick - Soft Vintage"},
+            {"Snare - Crack", "Snare - Tight Pop", "Snare - Wide Layer", "Snare - Dark Punch", "Snare - Bright Snap", "Snare - Room Body", "Snare - Trap Rim", "Snare - Dry Knock", "Snare - Big Plate", "Snare - Lo-Fi"},
+            {"Perc - Clean Groove", "Perc - Bright Tick", "Perc - Warm Hand", "Perc - Wide Perc", "Perc - Tight Transient", "Perc - Organic", "Perc - Afro Groove", "Perc - Dark Texture", "Perc - Punch Layer", "Perc - Soft Space"},
+            {"Hi-Hat - Crisp Trap", "Hi-Hat - Smooth Top", "Hi-Hat - Tight Dry", "Hi-Hat - Bright Roll", "Hi-Hat - Dark Control", "Hi-Hat - Open Air", "Hi-Hat - Wide Pattern", "Hi-Hat - Soft Tick", "Hi-Hat - Modern Drill", "Hi-Hat - Lo-Fi Dust"},
+            {"808 - Clean Sub", "808 - Hard Clip", "808 - Long Glide", "808 - Tight Mono", "808 - Deep Round", "808 - Grit Distort", "808 - Punch Bass", "808 - Dark Heavy", "808 - Smooth Sustain", "808 - Drill Growl"}
+        };
+        for (const auto& group : groups) for (auto* name : group) a.add(name);
+        return a;
+    }();
+}
+
+void HFXSpectrumView::mouseDown(const juce::MouseEvent& e)
+{
+    if (displayMode != 0) return;
+    const auto r = getLocalBounds().toFloat();
+    float best = 1.0e9f;
+    draggedBand = -1;
+    for (int band = 0; band < 5; ++band)
+    {
+        const float t = std::log(processor.eqBandFrequency(band) / 20.0f) / std::log(20000.0f / 20.0f);
+        const float x = r.getX() + t * r.getWidth();
+        const float y = r.getCentreY() - processor.eqBandGain(band) * (r.getHeight() / 40.0f);
+        const float d = e.position.getDistanceFrom({ x, y });
+        if (d < best && d < 28.0f) { best = d; draggedBand = band; }
+    }
+    if (draggedBand >= 0) updateEqFromPoint(e.position);
+}
+
+void HFXSpectrumView::mouseDrag(const juce::MouseEvent& e)
+{
+    if (displayMode == 0 && draggedBand >= 0) updateEqFromPoint(e.position);
+}
+
+void HFXSpectrumView::updateEqFromPoint(juce::Point<float> point)
+{
+    const auto r = getLocalBounds().toFloat();
+    const float t = juce::jlimit(0.0f, 1.0f, (point.x - r.getX()) / juce::jmax(1.0f, r.getWidth()));
+    const float hz = 20.0f * std::pow(20000.0f / 20.0f, t);
+    const float gain = juce::jlimit(-18.0f, 18.0f, (r.getCentreY() - point.y) * 40.0f / r.getHeight());
+    processor.setEqBandFromGraph(draggedBand, hz, gain);
+    repaint();
 }
 
 void HFXSpectrumView::paint(juce::Graphics& g)
@@ -29,8 +81,9 @@ void HFXSpectrumView::paint(juce::Graphics& g)
         constexpr int bins = 160;
         for (int i = 0; i < bins; ++i)
         {
-            const int sourceBin = juce::jlimit(0, 511, (int)(std::pow((double)i / (bins - 1), 2.0) * 511.0));
-            const float v = processor.spectrumAt(sourceBin);
+            const float t = (float)i / (float)(bins - 1);
+            const float hz = 20.0f * std::pow(20000.0f / 20.0f, t);
+            const float v = processor.spectrumAtFrequency(hz);
             const float x = r.getX() + r.getWidth() * (float)i / (float)(bins - 1);
             const float y = r.getBottom() - v * r.getHeight() * 0.88f;
             if (i == 0) { spectrum.startNewSubPath(x, y); fill.startNewSubPath(x, r.getBottom()); fill.lineTo(x, y); }
@@ -155,6 +208,7 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
     logo.setFont(juce::Font(42.0f, juce::Font::bold));
     logo.setColour(juce::Label::textColourId, HFXColours::orange);
     addAndMakeVisible(logo);
+    logo.setVisible(false); // logo is rendered with the multi-pass glow in paint()
 
     trackMode.addItem("MAIN VOCAL", 1);
     trackMode.addItem("BEAT", 2);
@@ -186,7 +240,14 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
     presetBox.onChange = [this] { if (presetBox.getSelectedId() > 0) applyPreset(presetBox.getSelectedId()); };
     addAndMakeVisible(presetBox);
 
-    autoMix.onClick = [this] { processor.requestAutoMix(); status.setText("ANALYZING INPUT — PLAY AUDIO FOR 4 SECONDS", juce::dontSendNotification); };
+    autoMix.onClick = [this]
+    {
+        autoMixWaitTicks = 80;
+        processor.requestAutoMix();
+        status.setText("AUTO-MIX ANALYSIS STARTED — PLAY AUDIO FOR 4 SECONDS", juce::dontSendNotification);
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon, "HFX AUTO-MIX",
+            "Analyzing your incoming audio. Keep playback running for 4 seconds. HFX will then prepare a suggested starting mix.");
+    };
     addAndMakeVisible(autoMix);
     bypass.setClickingTogglesState(true);
     addAndMakeVisible(bypass);
@@ -271,12 +332,53 @@ void HFXAudioProcessorEditor::rebuildAttachments()
 
 void HFXAudioProcessorEditor::applyPreset(int id)
 {
-    auto set = [this](const char* key, float value)
+    auto set = [this](const juce::String& key, float value)
     {
         if (auto* parameter = processor.state().getParameter(key))
             parameter->setValueNotifyingHost(parameter->convertTo0to1(value));
     };
     const bool beat = trackMode.getSelectedId() == 2;
+    // All 50 presets, including the original first eight, now populate the live five-band EQ.
+    {
+        const int categoryForEq = juce::jlimit(0, 4, (id - 1) / 10);
+        const int variationForEq = (id - 1) % 10;
+        const float variationAmount = (float)variationForEq / 9.0f;
+        const float root = beat ? (categoryForEq == 4 ? 48.0f : 90.0f + categoryForEq * 80.0f)
+                                : 100.0f + categoryForEq * 110.0f;
+        for (int band = 0; band < 5; ++band)
+        {
+            const float freq = juce::jlimit(20.0f, 20000.0f, root * std::pow(2.0f, (float)band * (beat ? 1.55f : 1.7f)));
+            const float curve = (band == 0 ? -0.3f : band == 4 ? 0.25f : 0.1f) * (float)(categoryForEq + 1);
+            set("eqBandFreq" + juce::String(band), freq);
+            set("eqBandGain" + juce::String(band), juce::jlimit(-6.0f, 6.0f, (variationAmount - 0.5f) * 3.0f + curve));
+        }
+    }
+    if (id > 8)
+    {
+        // The additional entries are complete parameter snapshots, not labels-only presets.
+        const int category = (id - 1) / 10;
+        const int variation = (id - 1) % 10;
+        const float v = (float)variation / 9.0f;
+        const float baseFreq = beat ? (category == 4 ? 55.0f : 110.0f + category * 95.0f) : 120.0f + category * 90.0f;
+        const float baseGain = (v - 0.5f) * (beat ? 4.0f : 3.0f);
+        for (int band = 0; band < 5; ++band)
+        {
+            const float freq = juce::jlimit(20.0f, 20000.0f, baseFreq * std::pow(2.0f, (float)band * (beat ? 1.45f : 1.65f)));
+            const float shape = (band == 0 ? -0.25f : band == 4 ? 0.30f : 0.12f) * (float)(category + 1);
+            set("eqBandFreq" + juce::String(band), freq);
+            set("eqBandGain" + juce::String(band), juce::jlimit(-6.0f, 6.0f, baseGain + shape));
+        }
+        set("threshold", beat ? -16.0f - v * 8.0f : -19.0f - v * 7.0f);
+        set("ratio", beat ? 2.0f + category * 0.45f + v : 2.0f + category * 0.35f + v * 1.4f);
+        set("attack", beat ? 3.0f + v * 32.0f : 5.0f + v * 24.0f);
+        set("release", beat ? 45.0f + v * 130.0f : 65.0f + v * 115.0f);
+        set("drive", beat ? 1.0f + category * 0.55f + v * 2.0f : 0.5f + category * 0.45f + v * 1.5f);
+        set("tone", (v - 0.5f) * 0.5f); set("warmth", 0.1f + v * 0.35f);
+        set("satMix", 0.12f + v * 0.28f); set("width", beat ? 0.92f + v * 0.25f : 1.0f + v * 0.20f);
+        set("ceiling", -1.0f - v * 1.5f); set("inputGain", (0.5f - v) * 2.0f);
+        status.setText((beat ? "BEAT" : "VOCAL") + juce::String(" PRESET LOADED — CATEGORY ") + juce::String(category + 1) + " / VARIATION " + juce::String(variation + 1), juce::dontSendNotification);
+        return;
+    }
     if (!beat)
     {
         switch (id)
@@ -320,6 +422,12 @@ void HFXAudioProcessorEditor::timerCallback()
     leftMeterText.setText("L PEAK  " + juce::String(processor.leftPeakDb(), 1) + " dBFS", juce::dontSendNotification);
     rightMeterText.setText("R PEAK  " + juce::String(processor.rightPeakDb(), 1) + " dBFS", juce::dontSendNotification);
     rmsText.setText("OUTPUT RMS  " + juce::String(processor.outputRmsDb(), 1) + " dBFS", juce::dontSendNotification);
+    if (autoMixWaitTicks > 0 && !processor.autoMixReady())
+    {
+        --autoMixWaitTicks;
+        const int secondsLeft = (autoMixWaitTicks + 19) / 20;
+        status.setText("ANALYZING AUDIO — " + juce::String(secondsLeft) + " SEC", juce::dontSendNotification);
+    }
     repaint();
     if (processor.autoMixReady())
     {
@@ -328,8 +436,10 @@ void HFXAudioProcessorEditor::timerCallback()
         {
             if (auto* parameter = processor.state().getParameter(key)) parameter->setValueNotifyingHost(parameter->convertTo0to1(value));
         };
-        set("eqGain", result.eqGain); set("threshold", result.threshold); set("drive", result.drive); set("width", result.width); set("inputGain", result.inputGain);
-        status.setText("AUTO-MIX STARTING POINT APPLIED  |  RMS " + juce::String(result.rmsDb, 1) + " dBFS  |  CREST " + juce::String(result.crestDb, 1) + " dB", juce::dontSendNotification);
+        set("eqBandGain0", result.eqLow); set("eqBandGain1", result.eqLowMid);
+        set("eqBandGain2", result.eqMid); set("eqBandGain3", result.eqHighMid); set("eqBandGain4", result.eqHigh);
+        set("threshold", result.threshold); set("drive", result.drive); set("width", result.width); set("inputGain", result.inputGain);
+        status.setText("AUTO-MIX SUGGESTIONS APPLIED  |  LOW " + juce::String(result.eqLow, 1) + " dB  |  MID " + juce::String(result.eqMid, 1) + " dB  |  HIGH " + juce::String(result.eqHigh, 1) + " dB", juce::dontSendNotification);
     }
 }
 
@@ -346,13 +456,13 @@ void HFXAudioProcessorEditor::paint(juce::Graphics& g)
 
     // Soft multi-pass text glow for the HFX / HF identity.
     g.setFont(juce::Font(42.0f, juce::Font::bold));
-    for (int pass = 4; pass >= 1; --pass)
+    for (int pass = 12; pass >= 1; --pass)
     {
-        g.setColour(HFXColours::orange.withAlpha(0.10f * (float)pass));
+        g.setColour(HFXColours::orange.withAlpha(0.035f * (float)(13 - pass)));
         g.drawText("HFX", 22 - pass, 13 - pass, 120 + pass * 2, 58 + pass * 2, juce::Justification::left);
     }
-    for (int pass = 4; pass >= 1; --pass)
-    { g.setColour(HFXColours::orange.withAlpha(0.10f * (float)pass)); g.setFont(juce::Font(34.0f, juce::Font::bold)); g.drawText("HF", 28 - pass, getHeight() - 105 - pass, 62 + pass * 2, 48 + pass * 2, juce::Justification::centred); }
+    for (int pass = 12; pass >= 1; --pass)
+    { g.setColour(HFXColours::orange.withAlpha(0.035f * (float)(13 - pass))); g.setFont(juce::Font(34.0f, juce::Font::bold)); g.drawText("HF", 28 - pass, getHeight() - 105 - pass, 62 + pass * 2, 48 + pass * 2, juce::Justification::centred); }
     g.setColour(HFXColours::orange); g.setFont(juce::Font(34.0f, juce::Font::bold)); g.drawText("HF", 28, getHeight() - 105, 62, 48, juce::Justification::centred);
 
     const int mx = getWidth() - 76;
@@ -374,8 +484,10 @@ void HFXAudioProcessorEditor::resized()
     const int tabWidth = (getWidth() - 40 - tabGap * 4) / 5;
     for (int i = 0; i < panelModeCount; ++i) tabs[(size_t)i].setBounds(20 + i * (tabWidth + tabGap), tabY, tabWidth, tabHeight);
     spectrumView.setBounds(30, 185, getWidth() - 130, activeTab == 0 ? 275 : 290);
-    bypass.setBounds(30, 465, 90, 24);
-    status.setBounds(135, 465, getWidth() - 245, 24);
+    const int graphBottom = 185 + (activeTab == 0 ? 275 : 290);
+    const int utilityY = graphBottom + 10;
+    bypass.setBounds(30, utilityY, 90, 24);
+    status.setBounds(135, utilityY, getWidth() - 245, 24);
     leftMeterText.setBounds(getWidth() - 110, 520, 100, 18); rightMeterText.setBounds(getWidth() - 110, 540, 100, 18); rmsText.setBounds(getWidth() - 110, 560, 100, 18);
     const int available = getWidth() - 210;
     const int count = activeTab == 0 ? 5 : 4;

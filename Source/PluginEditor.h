@@ -8,10 +8,14 @@ class HFXSpectrumView final : public juce::Component
 public:
     explicit HFXSpectrumView(HFXAudioProcessor& p) : processor(p) {}
     void paint(juce::Graphics& g) override;
+    void mouseDown(const juce::MouseEvent& e) override;
+    void mouseDrag(const juce::MouseEvent& e) override;
     void setDisplayMode(int mode) noexcept { displayMode = mode; repaint(); }
 private:
     HFXAudioProcessor& processor;
     int displayMode = 0;
+    int draggedBand = -1;
+    void updateEqFromPoint(juce::Point<float> point);
 };
 
 class HFXAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
@@ -38,6 +42,7 @@ private:
     HFXSpectrumView spectrumView;
     int activeTab = 0;
     int lastPresetMode = -1;
+    int autoMixWaitTicks = 0;
 
     const std::array<std::array<const char*, 10>, 5> ids {{
         {{ "eqBandFreq0", "eqBandFreq1", "eqBandFreq2", "eqBandFreq3", "eqBandFreq4", "eqBandGain0", "eqBandGain1", "eqBandGain2", "eqBandGain3", "eqBandGain4" }},
