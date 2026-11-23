@@ -134,6 +134,26 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
     trackMode.addItem("BEAT", 2);
     addAndMakeVisible(trackMode);
     modeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(processor.state(), "trackMode", trackMode);
+
+    stemRole.addItem("KICK", 1);
+    stemRole.addItem("SNARE", 2);
+    stemRole.addItem("PERCUSSION", 3);
+    stemRole.addItem("CLOSED HAT", 4);
+    stemRole.addItem("OPEN HAT", 5);
+    stemRole.addItem("EFX", 6);
+    stemRole.addItem("808 / BASS", 7);
+    stemRole.addItem("DRUM FILLER", 8);
+    stemRole.addItem("OTHER", 9);
+    addAndMakeVisible(stemRole);
+    stemRoleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(processor.state(), "stemRole", stemRole);
+    stemRole.setVisible(trackMode.getSelectedId() == 2);
+    trackMode.onChange = [this]
+    {
+        const bool beatMode = trackMode.getSelectedId() == 2;
+        stemRole.setVisible(beatMode);
+        refreshPresetChoices();
+        resized();
+    };
     refreshPresetChoices();
     lastPresetMode = trackMode.getSelectedId();
 
@@ -320,7 +340,8 @@ void HFXAudioProcessorEditor::resized()
 {
     logo.setBounds(4, 2, 160, 65);
     trackMode.setBounds(getWidth() - 510, 18, 165, 34);
-    presetBox.setBounds(getWidth() - 335, 18, 175, 34);
+    stemRole.setBounds(getWidth() - 335, 18, 170, 34);
+    presetBox.setBounds(getWidth() - 510, 58, 310, 32);
     autoMix.setBounds(getWidth() - 148, 18, 128, 36);
     const int tabY = 91, tabHeight = 38, tabGap = 5;
     const int tabWidth = (getWidth() - 40 - tabGap * 4) / 5;

@@ -82,6 +82,7 @@ private:
     std::atomic<float>* pCeiling = nullptr;
     std::atomic<float>* pLimitRelease = nullptr;
     std::atomic<float>* pTrackMode = nullptr;
+    std::atomic<float>* pStemRole = nullptr;
     std::atomic<float>* pBypass = nullptr;
 
     std::atomic<float> leftPeak { -90.0f }, rightPeak { -90.0f }, outputRms { -90.0f };

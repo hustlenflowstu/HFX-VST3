@@ -26,13 +26,14 @@ private:
     HFXAudioProcessor& processor;
     HFXLookAndFeel laf;
     juce::Label logo, moduleTitle, status, leftMeterText, rightMeterText, rmsText;
-    juce::ComboBox trackMode, presetBox;
+    juce::ComboBox trackMode, stemRole, presetBox;
     juce::TextButton autoMix { "AUTO-MIX" }, bypass { "BYPASS" };
     std::array<juce::TextButton, 5> tabs;
     std::array<juce::Slider, 4> knobs;
     std::array<juce::Label, 4> knobLabels;
     std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>, 4> attachments;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> stemRoleAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttachment;
     HFXSpectrumView spectrumView;
     int activeTab = 0;
