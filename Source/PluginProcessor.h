@@ -63,12 +63,14 @@ private:
         float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f;
         float z1 = 0.0f, z2 = 0.0f;
         void setPeak(double sr, float freq, float q, float gainDb) noexcept;
+        void setFilter(double sr, float freq, float q, float gainDb, int type) noexcept;
         float process(float x) noexcept;
         void reset() noexcept { z1 = z2 = 0.0f; }
     };
-    std::array<std::array<Biquad, 5>, 2> eq;
+    std::array<std::array<std::array<Biquad, 4>, 5>, 2> eq;
     std::array<std::atomic<float>*, 5> pEqBandFreq {};
     std::array<std::atomic<float>*, 5> pEqBandGain {};
+    std::array<std::atomic<float>*, 5> pEqBandType {};
     std::array<float, 2> compEnvelope { 0.0f, 0.0f };
     std::array<float, 2> limiterGain { 1.0f, 1.0f };
     juce::AudioBuffer<float> delayBuffer;

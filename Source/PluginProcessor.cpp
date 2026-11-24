@@ -19,6 +19,61 @@ void HFXAudioProcessor::Biquad::setPeak(double sr, float freq, float q, float ga
     a2 = (float)((1.0 - alpha / A) / a0);
 }
 
+
+
+void HFXAudioProcessor::Biquad::setFilter(double sr, float freq, float q, float gainDb, int type) noexcept
+{
+    const float fs = (float)juce::jmax(1000.0, sr);
+    const float f = juce::jlimit(10.0f, fs * 0.45f, freq);
+    const float Q = juce::jmax(0.1f, q);
+    const float w = 2.0f * juce::MathConstants<float>::pi * f / fs;
+    const float cs = std::cos(w), sn = std::sin(w);
+    const float alpha = sn / (2.0f * Q);
+    const float A = std::pow(10.0f, gainDb / 40.0f);
+    float nb0=1.0f, nb1=0.0f, nb2=0.0f, na0=1.0f, na1=0.0f, na2=0.0f;
+    switch (type)
+    {
+        case 0: // 48 dB/oct low cut: four cascaded 12 dB stages
+        case 1: // 12 dB/oct low cut
+        case 6: // 12 dB/oct high cut
+        case 7: // 48 dB/oct high cut
+        {
+            const bool highpass = (type == 0 || type == 1);
+            nb0 = highpass ? (1.0f + cs) * 0.5f : (1.0f - cs) * 0.5f;
+            nb1 = highpass ? -(1.0f + cs) : (1.0f - cs);
+            nb2 = nb0;
+            na0 = 1.0f + alpha; na1 = -2.0f * cs; na2 = 1.0f - alpha;
+            break;
+        }
+        case 2: // low shelf
+        case 5: // high shelf
+        {
+            const float beta = 2.0f * std::sqrt(A) * alpha;
+            if (type == 2)
+            {
+                nb0=A*((A+1)-(A-1)*cs+beta); nb1=2*A*((A-1)-(A+1)*cs); nb2=A*((A+1)-(A-1)*cs-beta);
+                na0=(A+1)+(A-1)*cs+beta; na1=-2*((A-1)+(A+1)*cs); na2=(A+1)+(A-1)*cs-beta;
+            }
+            else
+            {
+                nb0=A*((A+1)+(A-1)*cs+beta); nb1=-2*A*((A-1)+(A+1)*cs); nb2=A*((A+1)+(A-1)*cs-beta);
+                na0=(A+1)-(A-1)*cs+beta; na1=2*((A-1)-(A+1)*cs); na2=(A+1)-(A-1)*cs-beta;
+            }
+            break;
+        }
+        case 4: // notch
+            nb0=1.0f; nb1=-2.0f*cs; nb2=1.0f; na0=1.0f+alpha; na1=-2.0f*cs; na2=1.0f-alpha;
+            break;
+        case 3: // bell
+        default:
+            nb0=1.0f+alpha*A; nb1=-2.0f*cs; nb2=1.0f-alpha*A;
+            na0=1.0f+alpha/A; na1=-2.0f*cs; na2=1.0f-alpha/A;
+            break;
+    }
+    if (std::abs(na0) < 1.0e-9f) return;
+    b0=nb0/na0; b1=nb1/na0; b2=nb2/na0; a1=na1/na0; a2=na2/na0;
+}
+
 float HFXAudioProcessor::Biquad::process(float x) noexcept
 {
     const float y = b0 * x + z1;
@@ -40,6 +95,7 @@ HFXAudioProcessor::HFXAudioProcessor()
     {
         pEqBandFreq[(size_t)band] = apvts.getRawParameterValue("eqBandFreq" + juce::String(band));
         pEqBandGain[(size_t)band] = apvts.getRawParameterValue("eqBandGain" + juce::String(band));
+        pEqBandType[(size_t)band] = apvts.getRawParameterValue("eqBandType" + juce::String(band));
     }
     pThreshold = apvts.getRawParameterValue("threshold");
     pRatio = apvts.getRawParameterValue("ratio");
@@ -115,7 +171,8 @@ void HFXAudioProcessor::prepareToPlay(double sr, int)
 {
     sampleRateHz = sr;
     for (auto& channel : eq)
-        for (auto& filter : channel) filter.reset();
+        for (auto& band : channel)
+            for (auto& filter : band) filter.reset();
     compEnvelope = { 0.0f, 0.0f };
     limiterGain = { 1.0f, 1.0f };
     lowState = { 0.0f, 0.0f };
@@ -135,7 +192,8 @@ void HFXAudioProcessor::prepareToPlay(double sr, int)
 void HFXAudioProcessor::releaseResources()
 {
     for (auto& channel : eq)
-        for (auto& filter : channel) filter.reset();
+        for (auto& band : channel)
+            for (auto& filter : band) filter.reset();
 }
 
 bool HFXAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
@@ -147,9 +205,21 @@ bool HFXAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 
 void HFXAudioProcessor::updateParameters()
 {
-    for (int c = 0; c < 2; ++c)
+    for (int ch = 0; ch < 2; ++ch)
         for (int band = 0; band < 5; ++band)
-            eq[(size_t)c][(size_t)band].setPeak(sampleRateHz, pEqBandFreq[(size_t)band]->load(), 0.85f, pEqBandGain[(size_t)band]->load());
+        {
+            const int type = (int)pEqBandType[(size_t)band]->load();
+            const int stages = (type == 0 || type == 7) ? 4 : 1;
+            for (int stage = 0; stage < 4; ++stage)
+            {
+                auto& filter = eq[(size_t)ch][(size_t)band][(size_t)stage];
+                if (stage < stages)
+                    filter.setFilter(sampleRateHz, pEqBandFreq[(size_t)band]->load(), 0.7071f,
+                                     pEqBandGain[(size_t)band]->load(), type == 0 ? 1 : (type == 7 ? 6 : type));
+                else
+                    filter.setPeak(sampleRateHz, 1000.0f, 0.7071f, 0.0f);
+            }
+        }
 }
 
 void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -229,7 +299,8 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
         {
             float x = d[n] * inGain;
             for (int band = 0; band < 5; ++band)
-                x = eq[(size_t)c][(size_t)band].process(x);
+                for (int stage = 0; stage < 4; ++stage)
+                    x = eq[(size_t)c][(size_t)band][(size_t)stage].process(x);
 
             // RMS-style detector with a soft knee and logarithmic gain computer.
             const float detectorPower = x * x;
