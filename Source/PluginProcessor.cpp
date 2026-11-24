@@ -139,6 +139,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout HFXAudioProcessor::makeParam
         const auto suffix = String(band);
         f("eqBandFreq" + suffix, String(bandNames[band]) + " Frequency", { 20.0f, 20000.0f, 1.0f, 0.35f }, bandHz[band], "Hz");
         f("eqBandGain" + suffix, String(bandNames[band]) + " Gain", { -18.0f, 18.0f, 0.1f }, 0.0f, "dB");
+        params.push_back(std::make_unique<AudioParameterChoice>(
+            ParameterID { "eqBandType" + suffix, 1 },
+            String(bandNames[band]) + " Filter Type",
+            StringArray { "48 dB/oct Low Cut", "12 dB/oct Low Cut", "Low Shelf",
+                          "Bell", "Notch", "High Shelf", "12 dB/oct High Cut",
+                          "48 dB/oct High Cut" },
+            band == 0 ? 2 : (band == 4 ? 5 : 3)));
     }
     f("threshold", "Threshold", { -60.0f, 0.0f, 0.1f }, -18.0f, "dB");
     f("ratio", "Ratio", { 1.0f, 20.0f, 0.1f }, 4.0f, ":1");
