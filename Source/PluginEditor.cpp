@@ -203,7 +203,7 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
     : AudioProcessorEditor(&p), processor(p), spectrumView(p)
 {
     setLookAndFeel(&laf);
-    setSize(1120, 716);
+    setSize(1120, 800);
     logo.setText("HFX", juce::dontSendNotification);
     logo.setFont(juce::Font(42.0f, juce::Font::bold));
     logo.setColour(juce::Label::textColourId, HFXColours::orange);
@@ -276,6 +276,19 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
         knobLabels[(size_t)i].setFont(juce::Font(11.0f, juce::Font::bold));
         addAndMakeVisible(knobLabels[(size_t)i]);
     }
+    const juce::StringArray filterNames {
+        "48 dB/oct Low Cut", "12 dB/oct Low Cut", "Low Shelf", "Bell",
+        "Notch", "High Shelf", "12 dB/oct High Cut", "48 dB/oct High Cut"
+    };
+    for (int band = 0; band < 5; ++band)
+    {
+        auto& selector = eqFilterType[(size_t)band];
+        selector.addItemList(filterNames, 1);
+        addAndMakeVisible(selector);
+        eqFilterAttachments[(size_t)band] =
+            std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+                processor.state(), "eqBandType" + juce::String(band), selector);
+    }
     status.setColour(juce::Label::textColourId, HFXColours::muted); addAndMakeVisible(status);
     leftMeterText.setColour(juce::Label::textColourId, HFXColours::orange);
     rightMeterText.setColour(juce::Label::textColourId, HFXColours::orange);
@@ -319,7 +332,7 @@ void HFXAudioProcessorEditor::rebuildAttachments()
     for (auto& attachment : attachments) attachment.reset();
     for (int i = 0; i < 10; ++i)
     {
-        const bool used = (activeTab == 0) || (i < 4);
+        const bool used = (activeTab == 0) || (activeTab == 3 ? i < 3 : i < 4);
         knobLabels[(size_t)i].setVisible(used);
         knobs[(size_t)i].setVisible(used);
         if (used)
@@ -482,23 +495,36 @@ void HFXAudioProcessorEditor::resized()
     autoMix.setBounds(getWidth() - 148, 18, 128, 36);
     const int tabY = 91, tabHeight = 38, tabGap = 5;
     const int tabWidth = (getWidth() - 40 - tabGap * 4) / 5;
-    for (int i = 0; i < panelModeCount; ++i) tabs[(size_t)i].setBounds(20 + i * (tabWidth + tabGap), tabY, tabWidth, tabHeight);
-    spectrumView.setBounds(30, 185, getWidth() - 130, activeTab == 0 ? 275 : 290);
-    const int graphBottom = 185 + (activeTab == 0 ? 275 : 290);
-    const int utilityY = graphBottom + 10;
+    for (int i = 0; i < panelModeCount; ++i)
+        tabs[(size_t)i].setBounds(20 + i * (tabWidth + tabGap), tabY, tabWidth, tabHeight);
+    const int graphHeight = activeTab == 0 ? 320 : 350;
+    spectrumView.setBounds(30, 185, getWidth() - 130, graphHeight);
+    const int graphBottom = 185 + graphHeight;
+    const int utilityY = graphBottom + 8;
     bypass.setBounds(30, utilityY, 90, 24);
     status.setBounds(135, utilityY, getWidth() - 245, 24);
-    leftMeterText.setBounds(getWidth() - 110, 520, 100, 18); rightMeterText.setBounds(getWidth() - 110, 540, 100, 18); rmsText.setBounds(getWidth() - 110, 560, 100, 18);
+    leftMeterText.setBounds(getWidth() - 110, 555, 100, 18);
+    rightMeterText.setBounds(getWidth() - 110, 575, 100, 18);
+    rmsText.setBounds(getWidth() - 110, 595, 100, 18);
+    if (activeTab == 0)
+    {
+        const int filterCell = (getWidth() - 90) / 5;
+        for (int band = 0; band < 5; ++band)
+            eqFilterType[(size_t)band].setBounds(35 + band * filterCell, graphBottom + 38, filterCell - 10, 28);
+    }
+    else for (auto& selector : eqFilterType) selector.setBounds(0, 0, 0, 0);
     const int available = getWidth() - 210;
-    const int count = activeTab == 0 ? 5 : 4;
+    const int count = activeTab == 0 ? 5 : (activeTab == 3 ? 3 : 4);
     const int cell = available / count;
     const int startX = 105;
     for (int i = 0; i < 10; ++i)
     {
+        const bool used = (activeTab == 0) || (activeTab == 3 ? i < 3 : i < 4);
+        if (!used) { knobLabels[(size_t)i].setBounds(0, 0, 0, 0); knobs[(size_t)i].setBounds(0, 0, 0, 0); continue; }
         const int row = activeTab == 0 ? i / 5 : 0;
         const int col = activeTab == 0 ? i % 5 : i;
         const int x = startX + col * cell;
-        const int y = activeTab == 0 ? 485 + row * 92 : 535;
+        const int y = activeTab == 0 ? graphBottom + 72 + row * 98 : graphBottom + 54;
         knobLabels[(size_t)i].setBounds(x, y, cell - 8, 16);
         knobs[(size_t)i].setBounds(x + (cell - 76) / 2, y + 14, 76, 76);
     }

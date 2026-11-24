@@ -90,7 +90,9 @@ private:
     std::atomic<float>* pWarmth = nullptr;
     std::atomic<float>* pSatMix = nullptr;
     std::atomic<float>* pWidth = nullptr;
-    std::atomic<float>* pPan = nullptr;
+    std::atomic<float>* pPan = nullptr; // legacy global pan
+    std::atomic<float>* pLeftPan = nullptr;
+    std::atomic<float>* pRightPan = nullptr;
     std::atomic<float>* pMonoFreq = nullptr;
     std::atomic<float>* pHaasMs = nullptr;
     std::atomic<float>* pInputGain = nullptr;

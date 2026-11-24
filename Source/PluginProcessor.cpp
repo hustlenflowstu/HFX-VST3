@@ -107,6 +107,8 @@ HFXAudioProcessor::HFXAudioProcessor()
     pSatMix = apvts.getRawParameterValue("satMix");
     pWidth = apvts.getRawParameterValue("width");
     pPan = apvts.getRawParameterValue("pan");
+    pLeftPan = apvts.getRawParameterValue("leftPan");
+    pRightPan = apvts.getRawParameterValue("rightPan");
     pMonoFreq = apvts.getRawParameterValue("monoFreq");
     pHaasMs = apvts.getRawParameterValue("haasMs");
     pInputGain = apvts.getRawParameterValue("inputGain");
@@ -157,6 +159,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout HFXAudioProcessor::makeParam
     f("satMix", "Saturation Mix", { 0.0f, 1.0f, 0.01f }, 0.35f);
     f("width", "Width", { 0.0f, 2.0f, 0.01f }, 1.0f);
     f("pan", "Pan", { -1.0f, 1.0f, 0.01f }, 0.0f);
+    f("leftPan", "Left Channel Pan", { -1.0f, 1.0f, 0.01f }, -1.0f);
+    f("rightPan", "Right Channel Pan", { -1.0f, 1.0f, 0.01f }, 1.0f);
     f("monoFreq", "Mono Maker", { 20.0f, 300.0f, 1.0f }, 120.0f, "Hz");
     f("haasMs", "Haas Delay", { 0.0f, 30.0f, 0.1f }, 0.0f, "ms");
     f("inputGain", "Input Gain", { -12.0f, 18.0f, 0.1f }, 0.0f, "dB");
@@ -282,13 +286,13 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
     const float satMix = pSatMix->load();
     const float tone = pTone->load();
     const float width = pWidth->load();
-    const float pan = pPan->load();
-    const float monoHz = pMonoFreq->load();
-    const float haasMs = pHaasMs->load();
-    const int delaySamples = juce::jlimit(0, delayBuffer.getNumSamples() - 1,
-                                          (int)std::round(haasMs * 0.001f * (float)sampleRateHz));
+    const float leftPan = juce::jlimit(-1.0f, 1.0f, pLeftPan->load());
+    const float rightPan = juce::jlimit(-1.0f, 1.0f, pRightPan->load());
+    const float leftToL = std::cos((leftPan + 1.0f) * juce::MathConstants<float>::pi * 0.25f);
+    const float leftToR = std::sin((leftPan + 1.0f) * juce::MathConstants<float>::pi * 0.25f);
+    const float rightToL = std::cos((rightPan + 1.0f) * juce::MathConstants<float>::pi * 0.25f);
+    const float rightToR = std::sin((rightPan + 1.0f) * juce::MathConstants<float>::pi * 0.25f);
     const float warmth = pWarmth->load();
-    const float alpha = 1.0f - std::exp(-2.0f * juce::MathConstants<float>::pi * monoHz / (float)sampleRateHz);
     const float attackMs = pAttack->load();
     const float releaseMs = pRelease->load();
     const float attackCoeff = std::exp(-1.0f / (0.001f * attackMs * (float)sampleRateHz));
@@ -350,29 +354,14 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
     {
         auto* l = buffer.getWritePointer(0);
         auto* r = buffer.getWritePointer(1);
-        const float gainL = std::sqrt(0.5f * (1.0f - pan)) * 1.41421356f;
-        const float gainR = std::sqrt(0.5f * (1.0f + pan)) * 1.41421356f;
         for (int n = 0; n < samples; ++n)
         {
-            const float lowL = lowState[0] + alpha * (l[n] - lowState[0]);
-            const float lowR = lowState[1] + alpha * (r[n] - lowState[1]);
-            lowState[0] = lowL;
-            lowState[1] = lowR;
-            const float monoLow = 0.5f * (lowL + lowR);
-            const float highL = l[n] - lowL;
-            const float highR = r[n] - lowR;
-            const float outL = (monoLow + highL * width) * gainL;
-            const float outR = (monoLow + highR * width) * gainR;
-
-            // Delay the right channel by the selected Haas interval. The
-            // delay ring is allocated in prepareToPlay, never in processBlock.
-            delayBuffer.setSample(0, delayWrite, outL);
-            delayBuffer.setSample(1, delayWrite, outR);
-            const int readPos = (delayWrite - delaySamples + delayBuffer.getNumSamples())
-                                % delayBuffer.getNumSamples();
-            l[n] = delayBuffer.getSample(0, delayWrite);
-            r[n] = delayBuffer.getSample(1, readPos);
-            if (++delayWrite >= delayBuffer.getNumSamples()) delayWrite = 0;
+            const float mid = 0.5f * (l[n] + r[n]);
+            const float side = 0.5f * (l[n] - r[n]) * width;
+            const float widenedL = mid + side;
+            const float widenedR = mid - side;
+            l[n] = widenedL * leftToL + widenedR * rightToL;
+            r[n] = widenedL * leftToR + widenedR * rightToR;
         }
     }
 
