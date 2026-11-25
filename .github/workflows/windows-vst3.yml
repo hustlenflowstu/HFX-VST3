@@ -1,3 +1,4 @@
+
 name: Build HFX VST3 and Windows Installer
 
 on:
@@ -18,30 +19,15 @@ jobs:
       - name: Build VST3
         run: cmake --build build --config Release --target HFX_VST3
 
-      # Upload PDBs even if the build step fails, when the compiler has produced any.
-      - name: Upload HFX Debug Symbols
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: HFX-Debug-Symbols
-          path: |
-            build/**/*.pdb
-            build/**/HFX.vst3/**
-          if-no-files-found: warn
-          retention-days: 14
-
       - name: Install Inno Setup
-        if: success()
         run: choco install innosetup --yes --no-progress
 
       - name: Create Installer
-        if: success()
         shell: pwsh
         run: |
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" HFX_Installer.iss
 
       - name: Upload HFX Installer
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: HFX-Setup-Windows-x64
