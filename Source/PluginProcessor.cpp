@@ -227,8 +227,10 @@ void HFXAudioProcessor::updateParameters()
             {
                 auto& filter = eq[(size_t)ch][(size_t)band][(size_t)stage];
                 if (stage < stages)
-                    filter.setFilter(sampleRateHz, pEqBandFreq[(size_t)band]->load(), pEqBandQ[(size_t)band]->load(),
-                                     pEqBandGain[(size_t)band]->load(), type == 0 ? 1 : (type == 7 ? 6 : type));
+                    filter.setFilter(sampleRateHz, freqParam->load(std::memory_order_relaxed),
+                                     qParam->load(std::memory_order_relaxed),
+                                     gainParam->load(std::memory_order_relaxed),
+                                     type == 0 ? 1 : (type == 7 ? 6 : type));
                 else
                     filter.setPeak(sampleRateHz, 1000.0f, 0.7071f, 0.0f);
             }
@@ -279,6 +281,22 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
         captureStereoScope();
         return;
     }
+
+    // Defensive guard: never dereference APVTS raw parameter pointers unless all
+    // required parameters were created successfully by this processor instance.
+    if (pInputGain == nullptr || pDrive == nullptr || pSatMix == nullptr ||
+        pTone == nullptr || pWidth == nullptr || pLeftPan == nullptr ||
+        pRightPan == nullptr || pAttack == nullptr || pRelease == nullptr ||
+        pThreshold == nullptr || pRatio == nullptr || pCeiling == nullptr ||
+        pLimitRelease == nullptr)
+        return;
+
+    for (int band = 0; band < 8; ++band)
+        if (pEqBandFreq[(size_t) band] == nullptr ||
+            pEqBandGain[(size_t) band] == nullptr ||
+            pEqBandType[(size_t) band] == nullptr ||
+            pEqBandQ[(size_t) band] == nullptr)
+            return;
 
     updateParameters();
     const int channels = juce::jmin(2, buffer.getNumChannels());
@@ -439,17 +457,20 @@ void HFXAudioProcessor::setEqBandFromGraph(int band, float frequencyHz, float ga
 
 float HFXAudioProcessor::eqBandFrequency(int band) const noexcept
 {
-    return (band >= 0 && band < 8) ? pEqBandFreq[(size_t)band]->load(std::memory_order_relaxed) : 1000.0f;
+    return (band >= 0 && band < 8 && pEqBandFreq[(size_t)band] != nullptr)
+        ? pEqBandFreq[(size_t)band]->load(std::memory_order_relaxed) : 1000.0f;
 }
 
 float HFXAudioProcessor::eqBandQ(int band) const noexcept
 {
-    return (band >= 0 && band < 8) ? pEqBandQ[(size_t)band]->load(std::memory_order_relaxed) : 0.7071f;
+    return (band >= 0 && band < 8 && pEqBandQ[(size_t)band] != nullptr)
+        ? pEqBandQ[(size_t)band]->load(std::memory_order_relaxed) : 0.7071f;
 }
 
 float HFXAudioProcessor::eqBandGain(int band) const noexcept
 {
-    return (band >= 0 && band < 8) ? pEqBandGain[(size_t)band]->load(std::memory_order_relaxed) : 0.0f;
+    return (band >= 0 && band < 8 && pEqBandGain[(size_t)band] != nullptr)
+        ? pEqBandGain[(size_t)band]->load(std::memory_order_relaxed) : 0.0f;
 }
 
 float HFXAudioProcessor::waveformAt(int index) const noexcept

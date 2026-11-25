@@ -1,0 +1,6 @@
+HFX EQ8 CRASH GUARD UPDATE
+
+This package contains the EQ8 source plus defensive parameter-pointer checks.
+No Preset or Auto Mix logic was intentionally changed.
+No claim of successful compilation or Ableton validation is made.
+See HFX_CRASH_REPORT_ANALYSIS.txt for the crash evidence and limits.
