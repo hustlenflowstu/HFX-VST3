@@ -45,7 +45,11 @@ void HFXSpectrumView::mouseDown(const juce::MouseEvent& e)
         const float d = e.position.getDistanceFrom({ x, y });
         if (d < best && d < 28.0f) { best = d; draggedBand = band; }
     }
-    if (draggedBand >= 0) updateEqFromPoint(e.position);
+    if (draggedBand >= 0)
+    {
+        if (onBandSelected) onBandSelected(draggedBand);
+        updateEqFromPoint(e.position);
+    }
 }
 
 void HFXSpectrumView::mouseDrag(const juce::MouseEvent& e)
@@ -99,13 +103,7 @@ void HFXSpectrumView::paint(juce::Graphics& g)
         {
             const float t = (float)i / 239.0f;
             const float hz = minHz * std::pow(maxHz / minHz, t);
-            float db = 0.0f;
-            for (int band = 0; band < 5; ++band)
-            {
-                const float centre = processor.eqBandFrequency(band);
-                const float octaves = std::log2(hz / centre);
-                db += processor.eqBandGain(band) * std::exp(-0.5f * octaves * octaves / 0.72f);
-            }
+            const float db = processor.eqResponseDbAt(hz);
             const float x = r.getX() + t * r.getWidth();
             const float y = r.getCentreY() - juce::jlimit(-18.0f, 18.0f, db) * (r.getHeight() / 40.0f);
             if (i == 0) response.startNewSubPath(x, y); else response.lineTo(x, y);
@@ -117,7 +115,10 @@ void HFXSpectrumView::paint(juce::Graphics& g)
             const float t = std::log(processor.eqBandFrequency(band) / minHz) / std::log(maxHz / minHz);
             const float x = r.getX() + t * r.getWidth();
             const float y = r.getCentreY() - processor.eqBandGain(band) * (r.getHeight() / 40.0f);
-            g.setColour(HFXColours::orange.withAlpha(0.22f)); g.fillEllipse(x - 9.0f, y - 9.0f, 18.0f, 18.0f);
+            const bool selected = band == draggedBand;
+            g.setColour(HFXColours::orange.withAlpha(selected ? 0.35f : 0.22f));
+            g.fillEllipse(x - (selected ? 12.0f : 9.0f), y - (selected ? 12.0f : 9.0f),
+                          selected ? 24.0f : 18.0f, selected ? 24.0f : 18.0f);
             g.setColour(HFXColours::orange); g.fillEllipse(x - 4.0f, y - 4.0f, 8.0f, 8.0f);
         }
     }
@@ -127,6 +128,25 @@ void HFXSpectrumView::paint(juce::Graphics& g)
         juce::Path diagonal; diagonal.startNewSubPath(r.getX() + 16, r.getBottom() - 16); diagonal.lineTo(r.getRight() - 16, r.getY() + 16);
         g.setColour(HFXColours::muted.withAlpha(0.65f)); g.strokePath(diagonal, juce::PathStrokeType(1.2f));
         const float threshold = processor.compressorThresholdDb();
+        const float ratio = juce::jmax(1.0f, processor.compressorRatio());
+        juce::Path transfer;
+        for (int i = 0; i <= 120; ++i)
+        {
+            const float inputDb = -60.0f + 60.0f * (float)i / 120.0f;
+            const float over = inputDb - threshold;
+            float outputDb = inputDb;
+            if (over > 3.0f) outputDb = threshold + over / ratio;
+            else if (over > -3.0f)
+            {
+                const float compressedOver = over + (1.0f / ratio - 1.0f) * (over + 3.0f) * (over + 3.0f) / 12.0f;
+                outputDb = threshold + compressedOver;
+            }
+            const float x = r.getX() + (inputDb + 60.0f) / 60.0f * r.getWidth();
+            const float y = r.getBottom() - ((juce::jlimit(-60.0f, 0.0f, outputDb) + 60.0f) / 60.0f) * r.getHeight();
+            if (i == 0) transfer.startNewSubPath(x, y); else transfer.lineTo(x, y);
+        }
+        g.setColour(HFXColours::orange.withAlpha(0.9f));
+        g.strokePath(transfer, juce::PathStrokeType(2.0f));
         const float thresholdNorm = juce::jlimit(0.0f, 1.0f, (threshold + 60.0f) / 60.0f);
         const float thresholdY = r.getBottom() - thresholdNorm * r.getHeight();
         g.setColour(HFXColours::orange.withAlpha(0.8f));
@@ -142,7 +162,7 @@ void HFXSpectrumView::paint(juce::Graphics& g)
         g.setColour(HFXColours::white.withAlpha(0.92f));
         g.strokePath(liveWave, juce::PathStrokeType(1.5f));
         g.setColour(HFXColours::orange); g.setFont(12.0f);
-        g.drawText("LIVE INPUT  |  THRESHOLD " + juce::String(threshold, 1) + " dB  |  RATIO " + juce::String(processor.compressorRatio(), 1) + ":1", r.toNearestInt().reduced(12, 8), juce::Justification::topLeft);
+        g.drawText("LIVE INPUT  |  THRESHOLD " + juce::String(threshold, 1) + " dB  |  RATIO " + juce::String(processor.compressorRatio(), 1) + ":1  |  GR " + juce::String(processor.compressorGainReductionDb(), 1) + " dB", r.toNearestInt().reduced(12, 8), juce::Justification::topLeft);
     }
     else if (displayMode == 2) // Saturator: transfer curve
     {
@@ -151,8 +171,7 @@ void HFXSpectrumView::paint(juce::Graphics& g)
         for (int i = 0; i <= 120; ++i)
         {
             const float xNorm = (float)i / 120.0f * 2.0f - 1.0f;
-            const float drive = juce::Decibels::decibelsToGain(processor.saturationDriveDb());
-            const float yNorm = std::tanh(xNorm * drive) / juce::jmax(0.001f, std::tanh(drive));
+            const float yNorm = processor.saturationTransfer(xNorm);
             const float x = r.getCentreX() + xNorm * r.getWidth() * 0.46f;
             const float y = mid - yNorm * r.getHeight() * 0.43f;
             if (i == 0) curve.startNewSubPath(x, y); else curve.lineTo(x, y);
@@ -195,7 +214,7 @@ void HFXSpectrumView::paint(juce::Graphics& g)
         const float ceiling = juce::Decibels::decibelsToGain(processor.limiterCeilingDb());
         const float ceilingY = r.getCentreY() - ceiling * (r.getHeight() - 24.0f) * 0.48f;
         g.setColour(HFXColours::orange); g.drawHorizontalLine((int)ceilingY, r.getX() + 8, r.getRight() - 8);
-        g.setColour(HFXColours::orange); g.drawText("LIVE OUTPUT  |  CEILING " + juce::String(processor.limiterCeilingDb(), 1) + " dB", r.toNearestInt().reduced(12, 8), juce::Justification::topLeft);
+        g.setColour(HFXColours::orange); g.drawText("LIVE OUTPUT  |  CEILING " + juce::String(processor.limiterCeilingDb(), 1) + " dB  |  GR " + juce::String(processor.limiterGainReductionDb(), 1) + " dB", r.toNearestInt().reduced(12, 8), juce::Justification::topLeft);
     }
 }
 
@@ -264,6 +283,12 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
     tabs[0].setToggleState(true, juce::dontSendNotification);
 
     addAndMakeVisible(spectrumView);
+    spectrumView.onBandSelected = [this](int band)
+    {
+        selectedEqBand = juce::jlimit(0, 4, band);
+        rebuildAttachments();
+        resized();
+    };
     for (int i = 0; i < 10; ++i)
     {
         auto& slider = knobs[(size_t)i];
@@ -275,19 +300,6 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
         knobLabels[(size_t)i].setColour(juce::Label::textColourId, HFXColours::muted);
         knobLabels[(size_t)i].setFont(juce::Font(11.0f, juce::Font::bold));
         addAndMakeVisible(knobLabels[(size_t)i]);
-    }
-    const juce::StringArray filterNames {
-        "48 dB/oct Low Cut", "12 dB/oct Low Cut", "Low Shelf", "Bell",
-        "Notch", "High Shelf", "12 dB/oct High Cut", "48 dB/oct High Cut"
-    };
-    for (int band = 0; band < 5; ++band)
-    {
-        auto& selector = eqFilterType[(size_t)band];
-        selector.addItemList(filterNames, 1);
-        addAndMakeVisible(selector);
-        eqFilterAttachments[(size_t)band] =
-            std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-                processor.state(), "eqBandType" + juce::String(band), selector);
     }
     status.setColour(juce::Label::textColourId, HFXColours::muted); addAndMakeVisible(status);
     leftMeterText.setColour(juce::Label::textColourId, HFXColours::orange);
@@ -332,14 +344,27 @@ void HFXAudioProcessorEditor::rebuildAttachments()
     for (auto& attachment : attachments) attachment.reset();
     for (int i = 0; i < 10; ++i)
     {
-        const bool used = (activeTab == 0) || (activeTab == 3 ? i < 3 : i < 4);
+        const bool used = i < 4;
         knobLabels[(size_t)i].setVisible(used);
         knobs[(size_t)i].setVisible(used);
-        if (used)
+        if (!used) continue;
+
+        juce::String parameterId;
+        if (activeTab == 0)
         {
-            knobLabels[(size_t)i].setText(names[(size_t)activeTab][(size_t)i], juce::dontSendNotification);
-            attachments[(size_t)i] = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.state(), ids[(size_t)activeTab][(size_t)i], knobs[(size_t)i]);
+            const juce::String suffix = juce::String(selectedEqBand);
+            if (i == 0) parameterId = "eqBandFreq" + suffix;
+            else if (i == 1) parameterId = "eqBandGain" + suffix;
+            else if (i == 2) parameterId = "eqBandQ" + suffix;
+            else parameterId = "eqBandDynamic" + suffix;
         }
+        else
+            parameterId = ids[(size_t)activeTab][(size_t)i];
+
+        knobLabels[(size_t)i].setText(names[(size_t)activeTab][(size_t)i],
+                                       juce::dontSendNotification);
+        attachments[(size_t)i] = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+            processor.state(), parameterId, knobs[(size_t)i]);
     }
 }
 
@@ -497,7 +522,8 @@ void HFXAudioProcessorEditor::resized()
     const int tabWidth = (getWidth() - 40 - tabGap * 4) / 5;
     for (int i = 0; i < panelModeCount; ++i)
         tabs[(size_t)i].setBounds(20 + i * (tabWidth + tabGap), tabY, tabWidth, tabHeight);
-    const int graphHeight = activeTab == 0 ? 320 : 350;
+
+    const int graphHeight = 320;
     spectrumView.setBounds(30, 185, getWidth() - 130, graphHeight);
     const int graphBottom = 185 + graphHeight;
     const int utilityY = graphBottom + 8;
@@ -506,26 +532,22 @@ void HFXAudioProcessorEditor::resized()
     leftMeterText.setBounds(getWidth() - 110, 555, 100, 18);
     rightMeterText.setBounds(getWidth() - 110, 575, 100, 18);
     rmsText.setBounds(getWidth() - 110, 595, 100, 18);
-    if (activeTab == 0)
-    {
-        const int filterCell = (getWidth() - 90) / 5;
-        for (int band = 0; band < 5; ++band)
-            eqFilterType[(size_t)band].setBounds(35 + band * filterCell, graphBottom + 38, filterCell - 10, 28);
-    }
-    else for (auto& selector : eqFilterType) selector.setBounds(0, 0, 0, 0);
+
     const int available = getWidth() - 210;
-    const int count = activeTab == 0 ? 5 : (activeTab == 3 ? 3 : 4);
-    const int cell = available / count;
+    const int cell = available / 4;
     const int startX = 105;
     for (int i = 0; i < 10; ++i)
     {
-        const bool used = (activeTab == 0) || (activeTab == 3 ? i < 3 : i < 4);
-        if (!used) { knobLabels[(size_t)i].setBounds(0, 0, 0, 0); knobs[(size_t)i].setBounds(0, 0, 0, 0); continue; }
-        const int row = activeTab == 0 ? i / 5 : 0;
-        const int col = activeTab == 0 ? i % 5 : i;
-        const int x = startX + col * cell;
-        const int y = activeTab == 0 ? graphBottom + 72 + row * 98 : graphBottom + 54;
+        const bool used = i < 4;
+        if (!used)
+        {
+            knobLabels[(size_t)i].setBounds(0, 0, 0, 0);
+            knobs[(size_t)i].setBounds(0, 0, 0, 0);
+            continue;
+        }
+        const int x = startX + i * cell;
+        const int y = graphBottom + 48;
         knobLabels[(size_t)i].setBounds(x, y, cell - 8, 16);
-        knobs[(size_t)i].setBounds(x + (cell - 76) / 2, y + 14, 76, 76);
+        knobs[(size_t)i].setBounds(x + (cell - 84) / 2, y + 14, 84, 84);
     }
 }

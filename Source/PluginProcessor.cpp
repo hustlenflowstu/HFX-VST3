@@ -82,6 +82,20 @@ float HFXAudioProcessor::Biquad::process(float x) noexcept
     return y;
 }
 
+float HFXAudioProcessor::Biquad::magnitudeAt(double sr, float frequencyHz) const noexcept
+{
+    const double w = 2.0 * juce::MathConstants<double>::pi
+                   * juce::jlimit(1.0, sr * 0.499, (double)frequencyHz) / sr;
+    const double c1 = std::cos(w), s1 = std::sin(w);
+    const double c2 = std::cos(2.0 * w), s2 = std::sin(2.0 * w);
+    const double nr = (double)b0 + (double)b1 * c1 + (double)b2 * c2;
+    const double ni = -(double)b1 * s1 - (double)b2 * s2;
+    const double dr = 1.0 + (double)a1 * c1 + (double)a2 * c2;
+    const double di = -(double)a1 * s1 - (double)a2 * s2;
+    const double den = dr * dr + di * di;
+    return den > 1.0e-18 ? (float)std::sqrt((nr * nr + ni * ni) / den) : 1.0f;
+}
+
 HFXAudioProcessor::HFXAudioProcessor()
     : AudioProcessor(BusesProperties()
         .withInput("Input", juce::AudioChannelSet::stereo(), true)
@@ -96,6 +110,8 @@ HFXAudioProcessor::HFXAudioProcessor()
         pEqBandFreq[(size_t)band] = apvts.getRawParameterValue("eqBandFreq" + juce::String(band));
         pEqBandGain[(size_t)band] = apvts.getRawParameterValue("eqBandGain" + juce::String(band));
         pEqBandType[(size_t)band] = apvts.getRawParameterValue("eqBandType" + juce::String(band));
+        pEqBandQ[(size_t)band] = apvts.getRawParameterValue("eqBandQ" + juce::String(band));
+        pEqBandDynamic[(size_t)band] = apvts.getRawParameterValue("eqBandDynamic" + juce::String(band));
     }
     pThreshold = apvts.getRawParameterValue("threshold");
     pRatio = apvts.getRawParameterValue("ratio");
@@ -111,6 +127,7 @@ HFXAudioProcessor::HFXAudioProcessor()
     pRightPan = apvts.getRawParameterValue("rightPan");
     pMonoFreq = apvts.getRawParameterValue("monoFreq");
     pHaasMs = apvts.getRawParameterValue("haasMs");
+    pTransient = apvts.getRawParameterValue("transient");
     pInputGain = apvts.getRawParameterValue("inputGain");
     pCeiling = apvts.getRawParameterValue("ceiling");
     pLimitRelease = apvts.getRawParameterValue("limitRelease");
@@ -141,6 +158,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout HFXAudioProcessor::makeParam
         const auto suffix = String(band);
         f("eqBandFreq" + suffix, String(bandNames[band]) + " Frequency", { 20.0f, 20000.0f, 1.0f, 0.35f }, bandHz[band], "Hz");
         f("eqBandGain" + suffix, String(bandNames[band]) + " Gain", { -18.0f, 18.0f, 0.1f }, 0.0f, "dB");
+        f("eqBandQ" + suffix, String(bandNames[band]) + " Q", { 0.2f, 8.0f, 0.01f }, 0.707f);
+        f("eqBandDynamic" + suffix, String(bandNames[band]) + " Dynamic", { 0.0f, 12.0f, 0.1f }, 0.0f, "dB");
         params.push_back(std::make_unique<AudioParameterChoice>(
             ParameterID { "eqBandType" + suffix, 1 },
             String(bandNames[band]) + " Filter Type",
@@ -163,6 +182,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout HFXAudioProcessor::makeParam
     f("rightPan", "Right Channel Pan", { -1.0f, 1.0f, 0.01f }, 1.0f);
     f("monoFreq", "Mono Maker", { 20.0f, 300.0f, 1.0f }, 120.0f, "Hz");
     f("haasMs", "Haas Delay", { 0.0f, 30.0f, 0.1f }, 0.0f, "ms");
+    f("transient", "Transient", { 0.0f, 1.0f, 0.01f }, 0.0f);
     f("inputGain", "Input Gain", { -12.0f, 18.0f, 0.1f }, 0.0f, "dB");
     f("ceiling", "Ceiling", { -12.0f, 0.0f, 0.1f }, -1.0f, "dB");
     f("limitRelease", "Limiter Release", { 10.0f, 500.0f, 1.0f }, 80.0f, "ms");
@@ -187,6 +207,12 @@ void HFXAudioProcessor::prepareToPlay(double sr, int)
     compEnvelope = { 0.0f, 0.0f };
     limiterGain = { 1.0f, 1.0f };
     lowState = { 0.0f, 0.0f };
+    transientEnvelope = { 0.0f, 0.0f };
+    toneLowState = { 0.0f, 0.0f };
+    eqDynamicDetector.store(0.0f, std::memory_order_relaxed);
+    stereoSideLowState = 0.0f;
+    compressorGR.store(0.0f);
+    limiterGR.store(0.0f);
     const int delayCapacity = juce::jmax(8192, (int)std::ceil(sr * 0.04) + 8192);
     delayBuffer.setSize(2, delayCapacity, false, true, true);
     delayBuffer.clear();
@@ -216,20 +242,23 @@ bool HFXAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 
 void HFXAudioProcessor::updateParameters()
 {
+    // Five fixed bell bands. The old filter-type parameters remain in the state tree
+    // only for compatibility with sessions created by earlier HFX builds.
     for (int ch = 0; ch < 2; ++ch)
         for (int band = 0; band < 5; ++band)
         {
-            const int type = (int)pEqBandType[(size_t)band]->load();
-            const int stages = (type == 0 || type == 7) ? 4 : 1;
-            for (int stage = 0; stage < 4; ++stage)
-            {
-                auto& filter = eq[(size_t)ch][(size_t)band][(size_t)stage];
-                if (stage < stages)
-                    filter.setFilter(sampleRateHz, pEqBandFreq[(size_t)band]->load(), 0.7071f,
-                                     pEqBandGain[(size_t)band]->load(), type == 0 ? 1 : (type == 7 ? 6 : type));
-                else
-                    filter.setPeak(sampleRateHz, 1000.0f, 0.7071f, 0.0f);
-            }
+            auto& filter = eq[(size_t)ch][(size_t)band][0];
+            const float q = pEqBandQ[(size_t)band] != nullptr
+                ? pEqBandQ[(size_t)band]->load(std::memory_order_relaxed) : 0.707f;
+            const float baseGain = pEqBandGain[(size_t)band]->load(std::memory_order_relaxed);
+            const float dynamicDb = pEqBandDynamic[(size_t)band] != nullptr
+                ? pEqBandDynamic[(size_t)band]->load(std::memory_order_relaxed) * eqDynamicDetector.load(std::memory_order_relaxed) : 0.0f;
+            filter.setPeak(sampleRateHz,
+                           pEqBandFreq[(size_t)band]->load(std::memory_order_relaxed),
+                           q,
+                           baseGain - dynamicDb);
+            for (int stage = 1; stage < 4; ++stage)
+                eq[(size_t)ch][(size_t)band][(size_t)stage].setPeak(sampleRateHz, 1000.0f, 0.707f, 0.0f);
         }
 }
 
@@ -238,150 +267,201 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
     juce::ScopedNoDenormals noDenormals;
     juce::ignoreUnused(midi);
 
+    const int channels = juce::jmin(2, buffer.getNumChannels());
+    const int samples = buffer.getNumSamples();
+    if (channels == 0 || samples == 0) return;
+
     for (int c = getTotalNumInputChannels(); c < getTotalNumOutputChannels(); ++c)
-        buffer.clear(c, 0, buffer.getNumSamples());
+        buffer.clear(c, 0, samples);
 
     pushSpectrum(buffer);
     analyzeAutoMix(buffer);
-    // Capture the incoming waveform and stereo image for the editor.
+
+    auto captureVisualsAndMeters = [this, &buffer, channels, samples]()
     {
-        const int nSamples = buffer.getNumSamples();
-        const auto* inL = buffer.getReadPointer(0);
-        const auto* inR = buffer.getNumChannels() > 1 ? buffer.getReadPointer(1) : inL;
+        const auto* l = buffer.getReadPointer(0);
+        const auto* r = channels > 1 ? buffer.getReadPointer(1) : l;
         int write = visualWrite.load(std::memory_order_relaxed);
-        for (int n = 0; n < nSamples; ++n)
+        float peakL = 0.0f, peakR = 0.0f;
+        double sumSq = 0.0;
+        for (int n = 0; n < samples; ++n)
         {
             const int slot = write++ % visualSize;
-            const float l = inL[n], r = inR[n];
-            waveformHistory[(size_t)slot].store(0.5f * (l + r), std::memory_order_relaxed);
+            const float left = l[n];
+            const float right = r[n];
+            waveformHistory[(size_t)slot].store(0.5f * (left + right), std::memory_order_relaxed);
+            scopeXHistory[(size_t)slot].store(0.5f * (left - right), std::memory_order_relaxed);
+            scopeYHistory[(size_t)slot].store(0.5f * (left + right), std::memory_order_relaxed);
+            peakL = juce::jmax(peakL, std::abs(left));
+            peakR = juce::jmax(peakR, std::abs(right));
+            sumSq += (double)left * left;
+        if (channels > 1) sumSq += (double)right * right;
         }
         visualWrite.store(write, std::memory_order_release);
-    }
-
-    auto captureStereoScope = [this, &buffer]() noexcept
-    {
-        const int nSamples = buffer.getNumSamples();
-        const auto* inL = buffer.getReadPointer(0);
-        const auto* inR = buffer.getNumChannels() > 1 ? buffer.getReadPointer(1) : inL;
-        int write = visualWrite.load(std::memory_order_relaxed);
-        for (int n = 0; n < nSamples; ++n)
-        {
-            const int slot = ((write - nSamples + n) % visualSize + visualSize) % visualSize;
-            const float l = inL[n], r = inR[n];
-            scopeXHistory[(size_t)slot].store(0.5f * (l - r), std::memory_order_relaxed);
-            scopeYHistory[(size_t)slot].store(0.5f * (l + r), std::memory_order_relaxed);
-        }
+        leftPeak.store(juce::Decibels::gainToDecibels(peakL, -90.0f), std::memory_order_relaxed);
+        rightPeak.store(juce::Decibels::gainToDecibels(channels > 1 ? peakR : peakL, -90.0f), std::memory_order_relaxed);
+        const double count = (double)juce::jmax(1, samples * channels);
+        outputRms.store(juce::Decibels::gainToDecibels((float)std::sqrt(sumSq / count), -90.0f), std::memory_order_relaxed);
     };
-    if (pBypass->load() > 0.5f)
+
+    if (pBypass->load(std::memory_order_relaxed) > 0.5f)
     {
-        captureStereoScope();
+        compressorGR.store(0.0f, std::memory_order_relaxed);
+        limiterGR.store(0.0f, std::memory_order_relaxed);
+        captureVisualsAndMeters();
         return;
     }
 
+    // Broadband detector controls the optional dynamic reduction of each EQ band.
+    double inputSquares = 0.0;
+    for (int ch = 0; ch < channels; ++ch)
+    {
+        const auto* data = buffer.getReadPointer(ch);
+        for (int n = 0; n < samples; ++n)
+            inputSquares += (double)data[n] * data[n];
+    }
+    const float inputRms = (float)std::sqrt(inputSquares / (double)juce::jmax(1, channels * samples));
+    const float inputDb = juce::Decibels::gainToDecibels(inputRms, -90.0f);
+    const float dynamicTarget = juce::jlimit(0.0f, 1.0f, (inputDb + 30.0f) / 30.0f);
+    const float previousDynamic = eqDynamicDetector.load(std::memory_order_relaxed);
+    eqDynamicDetector.store(previousDynamic + 0.15f * (dynamicTarget - previousDynamic),
+                            std::memory_order_relaxed);
     updateParameters();
-    const int channels = juce::jmin(2, buffer.getNumChannels());
-    const int samples = buffer.getNumSamples();
-    const float inGain = juce::Decibels::decibelsToGain(pInputGain->load());
-    const float drive = juce::Decibels::decibelsToGain(pDrive->load());
-    const float satMix = pSatMix->load();
-    const float tone = pTone->load();
-    const float width = pWidth->load();
-    const float leftPan = juce::jlimit(-1.0f, 1.0f, pLeftPan->load());
-    const float rightPan = juce::jlimit(-1.0f, 1.0f, pRightPan->load());
-    const float leftToL = std::cos((leftPan + 1.0f) * juce::MathConstants<float>::pi * 0.25f);
-    const float leftToR = std::sin((leftPan + 1.0f) * juce::MathConstants<float>::pi * 0.25f);
-    const float rightToL = std::cos((rightPan + 1.0f) * juce::MathConstants<float>::pi * 0.25f);
-    const float rightToR = std::sin((rightPan + 1.0f) * juce::MathConstants<float>::pi * 0.25f);
-    const float warmth = pWarmth->load();
-    const float attackMs = pAttack->load();
-    const float releaseMs = pRelease->load();
-    const float attackCoeff = std::exp(-1.0f / (0.001f * attackMs * (float)sampleRateHz));
-    const float releaseCoeff = std::exp(-1.0f / (0.001f * releaseMs * (float)sampleRateHz));
-    const float thresholdDb = pThreshold->load();
-    const float ratio = juce::jmax(1.0f, pRatio->load());
-    constexpr float kneeDb = 6.0f;
 
-    float peakL = 0.0f, peakR = 0.0f;
-    double sumSq = 0.0;
-    for (int c = 0; c < channels; ++c)
+    auto* left = buffer.getWritePointer(0);
+    auto* right = channels > 1 ? buffer.getWritePointer(1) : nullptr;
+    const float inputGain = juce::Decibels::decibelsToGain(pInputGain->load(std::memory_order_relaxed));
+    const float drive = juce::Decibels::decibelsToGain(pDrive->load(std::memory_order_relaxed));
+    const float satMix = pSatMix->load(std::memory_order_relaxed);
+    const float tone = pTone->load(std::memory_order_relaxed);
+    const float warmth = pWarmth->load(std::memory_order_relaxed);
+    const float thresholdDb = pThreshold->load(std::memory_order_relaxed);
+    const float ratio = juce::jmax(1.0f, pRatio->load(std::memory_order_relaxed));
+    const float attackCoeff = std::exp(-1.0f / (0.001f * pAttack->load(std::memory_order_relaxed) * (float)sampleRateHz));
+    const float releaseCoeff = std::exp(-1.0f / (0.001f * pRelease->load(std::memory_order_relaxed) * (float)sampleRateHz));
+    const float limiterReleaseCoeff = std::exp(-1.0f / (0.001f * pLimitRelease->load(std::memory_order_relaxed) * (float)sampleRateHz));
+    const float ceiling = juce::Decibels::decibelsToGain(pCeiling->load(std::memory_order_relaxed));
+    const float transientAmount = pTransient != nullptr ? pTransient->load(std::memory_order_relaxed) : 0.0f;
+    const float transientCoeff = std::exp(-1.0f / (0.002f * (float)sampleRateHz));
+    const float toneCoeff = std::exp(-1.0f / (0.001f * 2.0f * (float)sampleRateHz));
+    const float width = pWidth->load(std::memory_order_relaxed);
+    const float pan = juce::jlimit(-1.0f, 1.0f, pPan->load(std::memory_order_relaxed));
+    const float panLeft = pan > 0.0f ? std::cos(pan * juce::MathConstants<float>::halfPi) : 1.0f;
+    const float panRight = pan < 0.0f ? std::cos(-pan * juce::MathConstants<float>::halfPi) : 1.0f;
+    const float monoFreq = pMonoFreq->load(std::memory_order_relaxed);
+    const float monoCoeff = std::exp(-2.0f * juce::MathConstants<float>::pi * monoFreq / (float)sampleRateHz);
+    const int delayCapacity = delayBuffer.getNumSamples();
+    const int delaySamples = juce::jlimit(0, juce::jmax(0, delayCapacity - 1),
+        (int)std::round(pHaasMs->load(std::memory_order_relaxed) * 0.001 * sampleRateHz));
+
+    float maxCompReduction = 0.0f;
+    float maxLimitReduction = 0.0f;
+
+    for (int n = 0; n < samples; ++n)
     {
-        auto* d = buffer.getWritePointer(c);
-        for (int n = 0; n < samples; ++n)
+        float xL = left[n] * inputGain;
+        float xR = right != nullptr ? right[n] * inputGain : xL;
+
+        for (int band = 0; band < 5; ++band)
         {
-            float x = d[n] * inGain;
-            for (int band = 0; band < 5; ++band)
-                for (int stage = 0; stage < 4; ++stage)
-                    x = eq[(size_t)c][(size_t)band][(size_t)stage].process(x);
+            xL = eq[0][(size_t)band][0].process(xL);
+            if (right != nullptr)
+                xR = eq[1][(size_t)band][0].process(xR);
+        }
 
-            // RMS-style detector with a soft knee and logarithmic gain computer.
-            const float detectorPower = x * x;
-            const float coeff = detectorPower > compEnvelope[(size_t)c] ? attackCoeff : releaseCoeff;
-            compEnvelope[(size_t)c] = coeff * compEnvelope[(size_t)c] + (1.0f - coeff) * detectorPower;
-            const float levelDb = juce::Decibels::gainToDecibels(std::sqrt(juce::jmax(1.0e-12f, compEnvelope[(size_t)c])), -120.0f);
-            const float overDb = levelDb - thresholdDb;
-            float reductionDb = 0.0f;
-            if (kneeDb > 0.0f && overDb > -0.5f * kneeDb && overDb < 0.5f * kneeDb)
-            {
-                const float softened = overDb + 0.5f * kneeDb;
-                reductionDb = (1.0f / ratio - 1.0f) * softened * softened / (2.0f * kneeDb);
-            }
-            else if (overDb >= 0.5f * kneeDb)
-                reductionDb = (1.0f / ratio - 1.0f) * overDb;
-            x *= juce::Decibels::decibelsToGain(reductionDb);
+        // Stereo-linked RMS compressor detector: both channels receive the same gain.
+        const float detectorPower = right != nullptr
+            ? 0.5f * (xL * xL + xR * xR) : xL * xL;
+        const float compCoeff = detectorPower > compEnvelope[0] ? attackCoeff : releaseCoeff;
+        compEnvelope[0] = compCoeff * compEnvelope[0] + (1.0f - compCoeff) * detectorPower;
+        compEnvelope[1] = compEnvelope[0];
+        const float levelDb = juce::Decibels::gainToDecibels(std::sqrt(juce::jmax(1.0e-12f, compEnvelope[0])), -120.0f);
+        const float overDb = levelDb - thresholdDb;
+        constexpr float kneeDb = 6.0f;
+        float reductionDb = 0.0f;
+        if (overDb > -0.5f * kneeDb && overDb < 0.5f * kneeDb)
+        {
+            const float softened = overDb + 0.5f * kneeDb;
+            reductionDb = (1.0f / ratio - 1.0f) * softened * softened / (2.0f * kneeDb);
+        }
+        else if (overDb >= 0.5f * kneeDb)
+            reductionDb = (1.0f / ratio - 1.0f) * overDb;
+        const float compGain = juce::Decibels::decibelsToGain(reductionDb);
+        maxCompReduction = juce::jmax(maxCompReduction, -reductionDb);
+        xL *= compGain;
+        if (right != nullptr) xR *= compGain;
 
-            const float tilt = juce::Decibels::decibelsToGain(tone * 3.0f);
+        // Transient control adds a bounded attack component before saturation.
+        transientEnvelope[0] = transientCoeff * transientEnvelope[0] + (1.0f - transientCoeff) * xL;
+        const float transientL = xL - transientEnvelope[0];
+        xL += transientAmount * transientL;
+        if (right != nullptr)
+        {
+            transientEnvelope[1] = transientCoeff * transientEnvelope[1] + (1.0f - transientCoeff) * xR;
+            xR += transientAmount * (xR - transientEnvelope[1]);
+        }
+
+        auto saturate = [&](float x, int channel)
+        {
+            toneLowState[(size_t)channel] = toneCoeff * toneLowState[(size_t)channel] + (1.0f - toneCoeff) * x;
+            const float low = toneLowState[(size_t)channel];
+            const float high = x - low;
+            const float tilted = low * (1.0f - tone * 0.35f) + high * (1.0f + tone * 0.35f);
             const float bias = warmth * 0.12f;
-            const float saturated = 0.5f * (std::tanh(x * drive * tilt + bias)
-                                             + std::tanh(x * drive * tilt - bias));
-            x = x * (1.0f - satMix) + saturated * satMix;
+            const float norm = juce::jmax(0.001f, std::tanh(drive * (1.0f + std::abs(bias))));
+            const float wet = (std::tanh((tilted + bias) * drive) - std::tanh(bias * drive)) / norm;
+            return x * (1.0f - satMix) + wet * satMix;
+        };
+        xL = saturate(xL, 0);
+        if (right != nullptr) xR = saturate(xR, 1);
 
-            // Fast-attack, release-smoothed sample-peak gain control.
-            const float ceiling = juce::Decibels::decibelsToGain(pCeiling->load());
-            const float targetGain = std::abs(x) > ceiling ? ceiling / juce::jmax(0.000001f, std::abs(x)) : 1.0f;
-            const float limitReleaseMs = pLimitRelease->load();
-            const float limiterReleaseCoeff = std::exp(-1.0f / (0.001f * limitReleaseMs * (float)sampleRateHz));
-            if (targetGain < limiterGain[(size_t)c])
-                limiterGain[(size_t)c] = targetGain;
-            else
-                limiterGain[(size_t)c] = limiterReleaseCoeff * limiterGain[(size_t)c]
-                                       + (1.0f - limiterReleaseCoeff) * targetGain;
-            x *= limiterGain[(size_t)c];
-            d[n] = x;
-        }
-    }
+        // Linked sample-peak limiter with immediate attack and smoothed release.
+        const float peak = right != nullptr ? juce::jmax(std::abs(xL), std::abs(xR)) : std::abs(xL);
+        const float targetGain = peak > ceiling ? ceiling / juce::jmax(1.0e-9f, peak) : 1.0f;
+        if (targetGain < limiterGain[0]) limiterGain[0] = targetGain;
+        else limiterGain[0] = limiterReleaseCoeff * limiterGain[0] + (1.0f - limiterReleaseCoeff) * targetGain;
+        limiterGain[1] = limiterGain[0];
+        const float limitGR = -juce::Decibels::gainToDecibels(limiterGain[0], -90.0f);
+        maxLimitReduction = juce::jmax(maxLimitReduction, limitGR);
+        xL *= limiterGain[0];
+        if (right != nullptr) xR *= limiterGain[0];
 
-    if (channels == 2)
-    {
-        auto* l = buffer.getWritePointer(0);
-        auto* r = buffer.getWritePointer(1);
-        for (int n = 0; n < samples; ++n)
+        if (right != nullptr)
         {
-            const float mid = 0.5f * (l[n] + r[n]);
-            const float side = 0.5f * (l[n] - r[n]) * width;
-            const float widenedL = mid + side;
-            const float widenedR = mid - side;
-            l[n] = widenedL * leftToL + widenedR * rightToL;
-            r[n] = widenedL * leftToR + widenedR * rightToR;
+            // Mid/side width plus low-frequency mono-maker.
+            const float mid = 0.5f * (xL + xR);
+            const float side = 0.5f * (xL - xR);
+            stereoSideLowState = monoCoeff * stereoSideLowState + (1.0f - monoCoeff) * side;
+            const float monoSide = side - stereoSideLowState;
+            const float widenedSide = (monoSide + stereoSideLowState * 0.0f) * width;
+            xL = (mid + widenedSide) * panLeft;
+            xR = (mid - widenedSide) * panRight;
+
+            // Haas widening is blended conservatively to avoid a full-level delayed duplicate.
+            if (delaySamples > 0 && delayCapacity > delaySamples)
+            {
+                const int readIndex = (delayWrite - delaySamples + delayCapacity) % delayCapacity;
+                const float delayedLeft = delayBuffer.getReadPointer(0)[readIndex];
+                delayBuffer.setSample(0, delayWrite, xL);
+                delayBuffer.setSample(1, delayWrite, xR);
+                xR = 0.75f * xR + 0.25f * delayedLeft;
+                if (++delayWrite >= delayCapacity) delayWrite = 0;
+            }
+            else if (delayCapacity > 0)
+            {
+                delayBuffer.setSample(0, delayWrite, xL);
+                delayBuffer.setSample(1, delayWrite, xR);
+                if (++delayWrite >= delayCapacity) delayWrite = 0;
+            }
         }
+
+        left[n] = xL;
+        if (right != nullptr) right[n] = xR;
     }
 
-    captureStereoScope();
-
-    for (int c = 0; c < channels; ++c)
-    {
-        const auto* d = buffer.getReadPointer(c);
-        for (int n = 0; n < samples; ++n)
-        {
-            const float v = d[n];
-            if (c == 0) peakL = juce::jmax(peakL, std::abs(v));
-            if (c == 1) peakR = juce::jmax(peakR, std::abs(v));
-            sumSq += (double)v * (double)v;
-        }
-    }
-    leftPeak.store(juce::Decibels::gainToDecibels(peakL, -90.0f));
-    rightPeak.store(juce::Decibels::gainToDecibels(channels > 1 ? peakR : peakL, -90.0f));
-    const double count = (double)juce::jmax(1, samples * channels);
-    outputRms.store(juce::Decibels::gainToDecibels((float)std::sqrt(sumSq / count), -90.0f));
+    compressorGR.store(maxCompReduction, std::memory_order_relaxed);
+    limiterGR.store(maxLimitReduction, std::memory_order_relaxed);
+    captureVisualsAndMeters();
 }
 
 void HFXAudioProcessor::pushSpectrum(const juce::AudioBuffer<float>& b)
@@ -397,9 +477,14 @@ void HFXAudioProcessor::pushSpectrum(const juce::AudioBuffer<float>& b)
             std::fill(fftData.begin() + fftSize, fftData.end(), 0.0f);
             window.multiplyWithWindowingTable(fftData.data(), fftSize);
             fft.performFrequencyOnlyForwardTransform(fftData.data());
+            // Hann-window coherent-gain correction, then a stable -90..0 dB display range.
             for (int i = 0; i < fftSize / 2; ++i)
-                spectrum[(size_t)i].store(juce::jlimit(0.0f, 1.0f, fftData[(size_t)i] / 480.0f),
-                                          std::memory_order_relaxed);
+            {
+                const float magnitude = fftData[(size_t)i] / (float)(fftSize * 0.25);
+                const float db = juce::Decibels::gainToDecibels(magnitude, -90.0f);
+                const float display = juce::jlimit(0.0f, 1.0f, (db + 90.0f) / 90.0f);
+                spectrum[(size_t)i].store(display, std::memory_order_relaxed);
+            }
             spectrumVersion.fetch_add(1, std::memory_order_release);
             fftWrite = 0;
         }
@@ -443,6 +528,38 @@ float HFXAudioProcessor::eqBandFrequency(int band) const noexcept
 float HFXAudioProcessor::eqBandGain(int band) const noexcept
 {
     return (band >= 0 && band < 5) ? pEqBandGain[(size_t)band]->load(std::memory_order_relaxed) : 0.0f;
+}
+
+float HFXAudioProcessor::eqBandQ(int band) const noexcept
+{
+    return (band >= 0 && band < 5 && pEqBandQ[(size_t)band] != nullptr)
+        ? pEqBandQ[(size_t)band]->load(std::memory_order_relaxed) : 0.707f;
+}
+
+float HFXAudioProcessor::eqResponseDbAt(float frequencyHz) const noexcept
+{
+    float totalGain = 1.0f;
+    for (int band = 0; band < 5; ++band)
+    {
+        Biquad responseFilter;
+        responseFilter.setPeak(sampleRateHz,
+            pEqBandFreq[(size_t)band]->load(std::memory_order_relaxed),
+            eqBandQ(band),
+            pEqBandGain[(size_t)band]->load(std::memory_order_relaxed)
+            - (pEqBandDynamic[(size_t)band] != nullptr
+                ? pEqBandDynamic[(size_t)band]->load(std::memory_order_relaxed) * eqDynamicDetector.load(std::memory_order_relaxed) : 0.0f));
+        totalGain *= responseFilter.magnitudeAt(sampleRateHz, frequencyHz);
+    }
+    return juce::Decibels::gainToDecibels(totalGain, -60.0f);
+}
+
+float HFXAudioProcessor::saturationTransfer(float input) const noexcept
+{
+    const float drive = juce::Decibels::decibelsToGain(pDrive->load(std::memory_order_relaxed));
+    const float warmth = pWarmth->load(std::memory_order_relaxed);
+    const float bias = warmth * 0.12f;
+    const float norm = juce::jmax(0.001f, std::tanh(drive * (1.0f + std::abs(bias))));
+    return (std::tanh((input + bias) * drive) - std::tanh(bias * drive)) / norm;
 }
 
 float HFXAudioProcessor::waveformAt(int index) const noexcept

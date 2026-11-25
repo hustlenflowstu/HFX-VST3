@@ -44,6 +44,11 @@ public:
     void setEqBandFromGraph(int band, float frequencyHz, float gainDb);
     float eqBandFrequency(int band) const noexcept;
     float eqBandGain(int band) const noexcept;
+    float eqBandQ(int band) const noexcept;
+    float eqResponseDbAt(float frequencyHz) const noexcept;
+    float saturationTransfer(float input) const noexcept;
+    float compressorGainReductionDb() const noexcept { return compressorGR.load(std::memory_order_relaxed); }
+    float limiterGainReductionDb() const noexcept { return limiterGR.load(std::memory_order_relaxed); }
     float waveformAt(int index) const noexcept;
     float scopeXAt(int index) const noexcept;
     float scopeYAt(int index) const noexcept;
@@ -65,14 +70,23 @@ private:
         void setPeak(double sr, float freq, float q, float gainDb) noexcept;
         void setFilter(double sr, float freq, float q, float gainDb, int type) noexcept;
         float process(float x) noexcept;
+        float magnitudeAt(double sr, float frequencyHz) const noexcept;
         void reset() noexcept { z1 = z2 = 0.0f; }
     };
     std::array<std::array<std::array<Biquad, 4>, 5>, 2> eq;
     std::array<std::atomic<float>*, 5> pEqBandFreq {};
     std::array<std::atomic<float>*, 5> pEqBandGain {};
+    // Legacy filter-type parameters remain registered for old sessions, but the EQ
+    // now uses five fixed bell bands and exposes no filter selector.
     std::array<std::atomic<float>*, 5> pEqBandType {};
+    std::array<std::atomic<float>*, 5> pEqBandQ {};
+    std::array<std::atomic<float>*, 5> pEqBandDynamic {};
     std::array<float, 2> compEnvelope { 0.0f, 0.0f };
     std::array<float, 2> limiterGain { 1.0f, 1.0f };
+    std::array<float, 2> transientEnvelope { 0.0f, 0.0f };
+    std::array<float, 2> toneLowState { 0.0f, 0.0f };
+    std::atomic<float> eqDynamicDetector { 0.0f };
+    float stereoSideLowState = 0.0f;
     juce::AudioBuffer<float> delayBuffer;
     int delayWrite = 0;
     std::array<float, 2> lowState { 0.0f, 0.0f };
@@ -95,6 +109,7 @@ private:
     std::atomic<float>* pRightPan = nullptr;
     std::atomic<float>* pMonoFreq = nullptr;
     std::atomic<float>* pHaasMs = nullptr;
+    std::atomic<float>* pTransient = nullptr;
     std::atomic<float>* pInputGain = nullptr;
     std::atomic<float>* pCeiling = nullptr;
     std::atomic<float>* pLimitRelease = nullptr;
@@ -103,6 +118,7 @@ private:
     std::atomic<float>* pBypass = nullptr;
 
     std::atomic<float> leftPeak { -90.0f }, rightPeak { -90.0f }, outputRms { -90.0f };
+    std::atomic<float> compressorGR { 0.0f }, limiterGR { 0.0f };
 
     static constexpr int fftOrder = 12;
     static constexpr int fftSize = 1 << fftOrder;
