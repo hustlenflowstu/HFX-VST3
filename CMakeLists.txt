@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.22)
 project(HFX VERSION 1.0.0 LANGUAGES CXX)
 
+# Generate MSVC Program Database files so crash dumps can be symbolicated.
+if (MSVC)
+    set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT ProgramDatabase)
+endif()
+
 include(FetchContent)
 set(JUCE_BUILD_EXTRAS OFF CACHE BOOL "" FORCE)
 set(JUCE_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -36,6 +41,13 @@ target_sources(HFX PRIVATE
 )
 
 target_compile_features(HFX PRIVATE cxx_std_17)
+
+if (MSVC)
+    target_compile_options(HFX PRIVATE /Zi)
+    if (TARGET HFX_VST3)
+        target_link_options(HFX_VST3 PRIVATE /DEBUG)
+    endif()
+endif()
 target_compile_definitions(HFX PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
