@@ -91,13 +91,11 @@ HFXAudioProcessor::HFXAudioProcessor()
     pEqFreq = apvts.getRawParameterValue("eqFreq");
     pEqGain = apvts.getRawParameterValue("eqGain");
     pEqQ = apvts.getRawParameterValue("eqQ");
-    for (int band = 0; band < 8; ++band)
+    for (int band = 0; band < 5; ++band)
     {
         pEqBandFreq[(size_t)band] = apvts.getRawParameterValue("eqBandFreq" + juce::String(band));
         pEqBandGain[(size_t)band] = apvts.getRawParameterValue("eqBandGain" + juce::String(band));
         pEqBandType[(size_t)band] = apvts.getRawParameterValue("eqBandType" + juce::String(band));
-        pEqBandQ[(size_t)band] = apvts.getRawParameterValue("eqBandQ" + juce::String(band));
-        pEqBandDynamic[(size_t)band] = apvts.getRawParameterValue("eqBandDynamic" + juce::String(band));
     }
     pThreshold = apvts.getRawParameterValue("threshold");
     pRatio = apvts.getRawParameterValue("ratio");
@@ -136,22 +134,20 @@ juce::AudioProcessorValueTreeState::ParameterLayout HFXAudioProcessor::makeParam
     f("eqFreq", "EQ Frequency", { 30.0f, 18000.0f, 1.0f, 0.35f }, 250.0f, "Hz");
     f("eqGain", "EQ Gain", { -18.0f, 18.0f, 0.1f }, 0.0f, "dB");
     f("eqQ", "EQ Q", { 0.2f, 8.0f, 0.01f }, 1.0f);
-    const float bandHz[8] { 35.0f, 90.0f, 180.0f, 400.0f, 1000.0f, 3000.0f, 8000.0f, 15000.0f };
-    const char* bandNames[8] { "Band 1", "Band 2", "Band 3", "Band 4", "Band 5", "Band 6", "Band 7", "Band 8" };
-    for (int band = 0; band < 8; ++band)
+    const float bandHz[5] { 80.0f, 250.0f, 1000.0f, 5000.0f, 12000.0f };
+    const char* bandNames[5] { "Low", "Low Mid", "Mid", "High Mid", "High" };
+    for (int band = 0; band < 5; ++band)
     {
         const auto suffix = String(band);
         f("eqBandFreq" + suffix, String(bandNames[band]) + " Frequency", { 20.0f, 20000.0f, 1.0f, 0.35f }, bandHz[band], "Hz");
         f("eqBandGain" + suffix, String(bandNames[band]) + " Gain", { -18.0f, 18.0f, 0.1f }, 0.0f, "dB");
-        f("eqBandQ" + suffix, String(bandNames[band]) + " Q", { 0.1f, 18.0f, 0.01f, 0.35f }, 0.7071f);
-        f("eqBandDynamic" + suffix, String(bandNames[band]) + " Dynamic", { 0.0f, 16.0f, 0.1f }, 0.0f, "dB");
         params.push_back(std::make_unique<AudioParameterChoice>(
             ParameterID { "eqBandType" + suffix, 1 },
             String(bandNames[band]) + " Filter Type",
             StringArray { "48 dB/oct Low Cut", "12 dB/oct Low Cut", "Low Shelf",
                           "Bell", "Notch", "High Shelf", "12 dB/oct High Cut",
                           "48 dB/oct High Cut" },
-            band == 0 ? 0 : (band == 7 ? 7 : (band == 1 ? 2 : 3))));
+            band == 0 ? 2 : (band == 4 ? 5 : 3)));
     }
     f("threshold", "Threshold", { -60.0f, 0.0f, 0.1f }, -18.0f, "dB");
     f("ratio", "Ratio", { 1.0f, 20.0f, 0.1f }, 4.0f, ":1");
@@ -220,29 +216,20 @@ bool HFXAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 
 void HFXAudioProcessor::updateParameters()
 {
-    if (sampleRateHz < 1000.0)
-        return;
     for (int ch = 0; ch < 2; ++ch)
-        for (int band = 0; band < 8; ++band)
+        for (int band = 0; band < 5; ++band)
         {
-            auto* freqParam = pEqBandFreq[(size_t)band];
-            auto* gainParam = pEqBandGain[(size_t)band];
-            auto* qParam = pEqBandQ[(size_t)band];
-            if (freqParam == nullptr || gainParam == nullptr || qParam == nullptr)
-                continue;
-            // Fixed simple EQ topology: low shelf, six bell bands, high shelf.
-            const int filterType = (band == 0 ? 2 : (band == 7 ? 5 : 3));
-            const float dynamicAmount = pEqBandDynamic[(size_t)band] != nullptr
-                ? pEqBandDynamic[(size_t)band]->load(std::memory_order_relaxed) : 0.0f;
-            const float detector = juce::jlimit(0.0f, 1.0f, (blockInputRmsDb + 24.0f) / 24.0f);
-            const float dynamicGainDb = gainParam->load(std::memory_order_relaxed)
-                                      - dynamicAmount * detector;
-            eq[(size_t)ch][(size_t)band][0].setFilter(
-                sampleRateHz, freqParam->load(std::memory_order_relaxed),
-                qParam->load(std::memory_order_relaxed),
-                dynamicGainDb, filterType);
-            for (int stage = 1; stage < 4; ++stage)
-                eq[(size_t)ch][(size_t)band][(size_t)stage].setPeak(sampleRateHz, 1000.0f, 0.7071f, 0.0f);
+            const int type = (int)pEqBandType[(size_t)band]->load();
+            const int stages = (type == 0 || type == 7) ? 4 : 1;
+            for (int stage = 0; stage < 4; ++stage)
+            {
+                auto& filter = eq[(size_t)ch][(size_t)band][(size_t)stage];
+                if (stage < stages)
+                    filter.setFilter(sampleRateHz, pEqBandFreq[(size_t)band]->load(), 0.7071f,
+                                     pEqBandGain[(size_t)band]->load(), type == 0 ? 1 : (type == 7 ? 6 : type));
+                else
+                    filter.setPeak(sampleRateHz, 1000.0f, 0.7071f, 0.0f);
+            }
         }
 }
 
@@ -250,8 +237,6 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
 {
     juce::ScopedNoDenormals noDenormals;
     juce::ignoreUnused(midi);
-    if (buffer.getNumChannels() <= 0 || buffer.getNumSamples() <= 0)
-        return;
 
     for (int c = getTotalNumInputChannels(); c < getTotalNumOutputChannels(); ++c)
         buffer.clear(c, 0, buffer.getNumSamples());
@@ -287,42 +272,12 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
             scopeYHistory[(size_t)slot].store(0.5f * (l + r), std::memory_order_relaxed);
         }
     };
-    if (pBypass != nullptr && pBypass->load(std::memory_order_relaxed) > 0.5f)
+    if (pBypass->load() > 0.5f)
     {
         captureStereoScope();
         return;
     }
 
-    // Defensive guard: never dereference APVTS raw parameter pointers unless all
-    // required parameters were created successfully by this processor instance.
-    if (pInputGain == nullptr || pDrive == nullptr || pSatMix == nullptr ||
-        pTone == nullptr || pWidth == nullptr || pLeftPan == nullptr ||
-        pRightPan == nullptr || pAttack == nullptr || pRelease == nullptr ||
-        pThreshold == nullptr || pRatio == nullptr || pCeiling == nullptr ||
-        pLimitRelease == nullptr)
-        return;
-
-    for (int band = 0; band < 8; ++band)
-        if (pEqBandFreq[(size_t) band] == nullptr ||
-            pEqBandGain[(size_t) band] == nullptr ||
-            pEqBandQ[(size_t) band] == nullptr)
-            return;
-
-    // Broadband level detector for the simple per-band dynamic amount control.
-    {
-        double inputSquares = 0.0;
-        const int inputChannels = juce::jmin(2, buffer.getNumChannels());
-        const int inputSamples = buffer.getNumSamples();
-        for (int ch = 0; ch < inputChannels; ++ch)
-        {
-            const auto* input = buffer.getReadPointer(ch);
-            for (int n = 0; n < inputSamples; ++n)
-                inputSquares += (double)input[n] * (double)input[n];
-        }
-        const double inputCount = (double)juce::jmax(1, inputChannels * inputSamples);
-        blockInputRmsDb = juce::Decibels::gainToDecibels(
-            (float)std::sqrt(inputSquares / inputCount), -60.0f);
-    }
     updateParameters();
     const int channels = juce::jmin(2, buffer.getNumChannels());
     const int samples = buffer.getNumSamples();
@@ -353,8 +308,8 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
         auto* d = buffer.getWritePointer(c);
         for (int n = 0; n < samples; ++n)
         {
-            float x = d[n];
-            for (int band = 0; band < 8; ++band)
+            float x = d[n] * inGain;
+            for (int band = 0; band < 5; ++band)
                 for (int stage = 0; stage < 4; ++stage)
                     x = eq[(size_t)c][(size_t)band][(size_t)stage].process(x);
 
@@ -379,9 +334,6 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
             const float saturated = 0.5f * (std::tanh(x * drive * tilt + bias)
                                              + std::tanh(x * drive * tilt - bias));
             x = x * (1.0f - satMix) + saturated * satMix;
-
-            // Limiter input gain is applied immediately before peak limiting.
-            x *= inGain;
 
             // Fast-attack, release-smoothed sample-peak gain control.
             const float ceiling = juce::Decibels::decibelsToGain(pCeiling->load());
@@ -469,7 +421,7 @@ float HFXAudioProcessor::spectrumAtFrequency(float hz) const noexcept
 
 void HFXAudioProcessor::setEqBandFromGraph(int band, float frequencyHz, float gainDb)
 {
-    if (band < 0 || band >= 8) return;
+    if (band < 0 || band >= 5) return;
     auto set = [this](const juce::String& id, float value)
     {
         if (auto* parameter = apvts.getParameter(id))
@@ -485,20 +437,12 @@ void HFXAudioProcessor::setEqBandFromGraph(int band, float frequencyHz, float ga
 
 float HFXAudioProcessor::eqBandFrequency(int band) const noexcept
 {
-    return (band >= 0 && band < 8 && pEqBandFreq[(size_t)band] != nullptr)
-        ? pEqBandFreq[(size_t)band]->load(std::memory_order_relaxed) : 1000.0f;
-}
-
-float HFXAudioProcessor::eqBandQ(int band) const noexcept
-{
-    return (band >= 0 && band < 8 && pEqBandQ[(size_t)band] != nullptr)
-        ? pEqBandQ[(size_t)band]->load(std::memory_order_relaxed) : 0.7071f;
+    return (band >= 0 && band < 5) ? pEqBandFreq[(size_t)band]->load(std::memory_order_relaxed) : 1000.0f;
 }
 
 float HFXAudioProcessor::eqBandGain(int band) const noexcept
 {
-    return (band >= 0 && band < 8 && pEqBandGain[(size_t)band] != nullptr)
-        ? pEqBandGain[(size_t)band]->load(std::memory_order_relaxed) : 0.0f;
+    return (band >= 0 && band < 5) ? pEqBandGain[(size_t)band]->load(std::memory_order_relaxed) : 0.0f;
 }
 
 float HFXAudioProcessor::waveformAt(int index) const noexcept
@@ -572,7 +516,7 @@ void HFXAudioProcessor::analyzeAutoMix(const juce::AudioBuffer<float>& b)
         const float rmsDb = juce::Decibels::gainToDecibels(rms, -90.0f);
         const float peakDb = juce::Decibels::gainToDecibels(analysisPeak, -90.0f);
         const float crest = peakDb - rmsDb;
-        const bool beat = (pTrackMode != nullptr) && (pTrackMode->load(std::memory_order_relaxed) > 0.5f);
+        const bool beat = pTrackMode->load() > 0.5f;
 
         const float bandCount = juce::jmax(1.0f, (float)analysisCount);
         const float lowDb = juce::Decibels::gainToDecibels(std::sqrt((float)(analysisLowSquares / bandCount)), -90.0f);
