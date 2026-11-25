@@ -73,12 +73,14 @@ private:
     std::array<std::atomic<float>*, 8> pEqBandGain {};
     std::array<std::atomic<float>*, 8> pEqBandType {};
     std::array<std::atomic<float>*, 8> pEqBandQ {};
+    std::array<std::atomic<float>*, 8> pEqBandDynamic {};
     std::array<float, 2> compEnvelope { 0.0f, 0.0f };
     std::array<float, 2> limiterGain { 1.0f, 1.0f };
     juce::AudioBuffer<float> delayBuffer;
     int delayWrite = 0;
     std::array<float, 2> lowState { 0.0f, 0.0f };
     double sampleRateHz = 44100.0;
+    float blockInputRmsDb = -60.0f;
 
     std::atomic<float>* pEqFreq = nullptr;
     std::atomic<float>* pEqGain = nullptr;

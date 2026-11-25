@@ -97,6 +97,7 @@ HFXAudioProcessor::HFXAudioProcessor()
         pEqBandGain[(size_t)band] = apvts.getRawParameterValue("eqBandGain" + juce::String(band));
         pEqBandType[(size_t)band] = apvts.getRawParameterValue("eqBandType" + juce::String(band));
         pEqBandQ[(size_t)band] = apvts.getRawParameterValue("eqBandQ" + juce::String(band));
+        pEqBandDynamic[(size_t)band] = apvts.getRawParameterValue("eqBandDynamic" + juce::String(band));
     }
     pThreshold = apvts.getRawParameterValue("threshold");
     pRatio = apvts.getRawParameterValue("ratio");
@@ -143,6 +144,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout HFXAudioProcessor::makeParam
         f("eqBandFreq" + suffix, String(bandNames[band]) + " Frequency", { 20.0f, 20000.0f, 1.0f, 0.35f }, bandHz[band], "Hz");
         f("eqBandGain" + suffix, String(bandNames[band]) + " Gain", { -18.0f, 18.0f, 0.1f }, 0.0f, "dB");
         f("eqBandQ" + suffix, String(bandNames[band]) + " Q", { 0.1f, 18.0f, 0.01f, 0.35f }, 0.7071f);
+        f("eqBandDynamic" + suffix, String(bandNames[band]) + " Dynamic", { 0.0f, 16.0f, 0.1f }, 0.0f, "dB");
         params.push_back(std::make_unique<AudioParameterChoice>(
             ParameterID { "eqBandType" + suffix, 1 },
             String(bandNames[band]) + " Filter Type",
@@ -223,27 +225,24 @@ void HFXAudioProcessor::updateParameters()
     for (int ch = 0; ch < 2; ++ch)
         for (int band = 0; band < 8; ++band)
         {
-            auto* typeParam = pEqBandType[(size_t)band];
             auto* freqParam = pEqBandFreq[(size_t)band];
             auto* gainParam = pEqBandGain[(size_t)band];
             auto* qParam = pEqBandQ[(size_t)band];
-            if (typeParam == nullptr || freqParam == nullptr || gainParam == nullptr || qParam == nullptr)
+            if (freqParam == nullptr || gainParam == nullptr || qParam == nullptr)
                 continue;
-
-            const int type = (int)typeParam->load(std::memory_order_relaxed);
-            const int stages = (type == 0 || type == 7) ? 4 : 1;
-            for (int stage = 0; stage < 4; ++stage)
-            {
-                auto& filter = eq[(size_t)ch][(size_t)band][(size_t)stage];
-                if (stage < stages)
-                    filter.setFilter(sampleRateHz,
-                                     freqParam->load(std::memory_order_relaxed),
-                                     qParam->load(std::memory_order_relaxed),
-                                     gainParam->load(std::memory_order_relaxed),
-                                     type == 0 ? 1 : (type == 7 ? 6 : type));
-                else
-                    filter.setPeak(sampleRateHz, 1000.0f, 0.7071f, 0.0f);
-            }
+            // Fixed simple EQ topology: low shelf, six bell bands, high shelf.
+            const int filterType = (band == 0 ? 2 : (band == 7 ? 5 : 3));
+            const float dynamicAmount = pEqBandDynamic[(size_t)band] != nullptr
+                ? pEqBandDynamic[(size_t)band]->load(std::memory_order_relaxed) : 0.0f;
+            const float detector = juce::jlimit(0.0f, 1.0f, (blockInputRmsDb + 24.0f) / 24.0f);
+            const float dynamicGainDb = gainParam->load(std::memory_order_relaxed)
+                                      - dynamicAmount * detector;
+            eq[(size_t)ch][(size_t)band][0].setFilter(
+                sampleRateHz, freqParam->load(std::memory_order_relaxed),
+                qParam->load(std::memory_order_relaxed),
+                dynamicGainDb, filterType);
+            for (int stage = 1; stage < 4; ++stage)
+                eq[(size_t)ch][(size_t)band][(size_t)stage].setPeak(sampleRateHz, 1000.0f, 0.7071f, 0.0f);
         }
 }
 
@@ -306,10 +305,24 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
     for (int band = 0; band < 8; ++band)
         if (pEqBandFreq[(size_t) band] == nullptr ||
             pEqBandGain[(size_t) band] == nullptr ||
-            pEqBandType[(size_t) band] == nullptr ||
             pEqBandQ[(size_t) band] == nullptr)
             return;
 
+    // Broadband level detector for the simple per-band dynamic amount control.
+    {
+        double inputSquares = 0.0;
+        const int inputChannels = juce::jmin(2, buffer.getNumChannels());
+        const int inputSamples = buffer.getNumSamples();
+        for (int ch = 0; ch < inputChannels; ++ch)
+        {
+            const auto* input = buffer.getReadPointer(ch);
+            for (int n = 0; n < inputSamples; ++n)
+                inputSquares += (double)input[n] * (double)input[n];
+        }
+        const double inputCount = (double)juce::jmax(1, inputChannels * inputSamples);
+        blockInputRmsDb = juce::Decibels::gainToDecibels(
+            (float)std::sqrt(inputSquares / inputCount), -60.0f);
+    }
     updateParameters();
     const int channels = juce::jmin(2, buffer.getNumChannels());
     const int samples = buffer.getNumSamples();
