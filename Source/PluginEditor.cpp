@@ -50,26 +50,113 @@ void HFXSpectrumView::paint(juce::Graphics& g)
 
     if (displayMode != 0)
     {
+        const int mode = juce::jlimit(1, 4, displayMode);
+        const auto plot = r.reduced(22.0f, 24.0f);
         g.setColour(HFXColours::grid);
         g.drawRoundedRectangle(r.reduced(1.0f), 6.0f, 1.0f);
-        const juce::String titles[] {
-            "EQ", "COMPRESSOR", "SATURATOR", "PAN & WIDTH", "LIMITER"
-        };
-        const juce::String descriptions[] {
-            "", "THRESHOLD  •  RATIO  •  ATTACK  •  RELEASE",
-            "DRIVE  •  TONE  •  WARMTH  •  MIX",
-            "STEREO WIDTH  •  LEFT PAN  •  RIGHT PAN",
-            "INPUT GAIN  •  CEILING  •  RELEASE"
-        };
-        g.setColour(HFXColours::orange);
-        g.setFont(juce::Font(20.0f, juce::Font::bold));
-        g.drawText(titles[juce::jlimit(0, 4, displayMode)],
-                   r.removeFromTop(r.getHeight() * 0.48f).toNearestInt(),
-                   juce::Justification::centred);
         g.setColour(HFXColours::muted);
-        g.setFont(12.0f);
-        g.drawText(descriptions[juce::jlimit(0, 4, displayMode)],
-                   r.toNearestInt(), juce::Justification::centred);
+        g.setFont(11.0f);
+        const juce::String titles[] { "", "COMPRESSOR", "SATURATOR", "STEREO FIELD", "LIMITER" };
+        g.drawText(titles[mode], (int)r.getX() + 12, (int)r.getY() + 7, 220, 18, juce::Justification::left);
+
+        if (mode == 1) // Compressor transfer curve + incoming waveform
+        {
+            const float threshold = processor.compressorThresholdDb();
+            const float ratio = juce::jmax(1.0f, processor.compressorRatio());
+            auto mapDb = [&plot](float db, bool yAxis)
+            {
+                const float norm = juce::jlimit(0.0f, 1.0f, (db + 60.0f) / 60.0f);
+                return yAxis ? plot.getBottom() - norm * plot.getHeight()
+                             : plot.getX() + norm * plot.getWidth();
+            };
+            juce::Path transfer;
+            for (int i = 0; i <= 120; ++i)
+            {
+                const float inDb = -60.0f + (float)i;
+                const float outDb = inDb <= threshold ? inDb : threshold + (inDb - threshold) / ratio;
+                const float x = mapDb(inDb, false), y = mapDb(outDb, true);
+                if (i == 0) transfer.startNewSubPath(x, y); else transfer.lineTo(x, y);
+            }
+            g.setColour(HFXColours::muted.withAlpha(0.7f));
+            g.drawLine(plot.getX(), plot.getBottom(), plot.getRight(), plot.getY(), 1.0f);
+            g.setColour(HFXColours::orange);
+            g.strokePath(transfer, juce::PathStrokeType(2.4f));
+            const float tx = mapDb(threshold, false);
+            g.setColour(HFXColours::orange.withAlpha(0.55f));
+            g.drawVerticalLine((int)tx, plot.getY(), plot.getBottom());
+            g.setColour(HFXColours::muted);
+            g.drawText("INPUT LEVEL", (int)plot.getX(), (int)plot.getBottom() + 5, (int)plot.getWidth(), 16, juce::Justification::centred);
+        }
+        else if (mode == 2) // Saturator waveshaping transfer curve
+        {
+            const float driveDb = processor.saturationDriveDb();
+            const float drive = juce::Decibels::decibelsToGain(driveDb);
+            juce::Path curve;
+            for (int i = 0; i <= 160; ++i)
+            {
+                const float input = -1.0f + 2.0f * (float)i / 160.0f;
+                const float output = std::tanh(input * drive);
+                const float x = plot.getX() + (input + 1.0f) * 0.5f * plot.getWidth();
+                const float y = plot.getCentreY() - output * plot.getHeight() * 0.46f;
+                if (i == 0) curve.startNewSubPath(x, y); else curve.lineTo(x, y);
+            }
+            g.setColour(HFXColours::muted.withAlpha(0.7f));
+            g.drawLine(plot.getX(), plot.getCentreY(), plot.getRight(), plot.getCentreY(), 1.0f);
+            g.drawLine(plot.getCentreX(), plot.getY(), plot.getCentreX(), plot.getBottom(), 1.0f);
+            g.setColour(HFXColours::orange);
+            g.strokePath(curve, juce::PathStrokeType(2.5f));
+            g.setColour(HFXColours::muted);
+            g.drawText("INPUT", (int)plot.getX(), (int)plot.getBottom() + 5, (int)plot.getWidth(), 16, juce::Justification::centred);
+        }
+        else if (mode == 3) // Ozone-Imager-inspired stereo vectorscope
+        {
+            const auto scope = plot.withSizeKeepingCentre(juce::jmin(plot.getWidth(), plot.getHeight()),
+                                                           juce::jmin(plot.getWidth(), plot.getHeight()));
+            g.setColour(HFXColours::grid);
+            g.drawEllipse(scope);
+            g.drawLine(scope.getCentreX(), scope.getY(), scope.getCentreX(), scope.getBottom(), 1.0f);
+            g.drawLine(scope.getX(), scope.getCentreY(), scope.getRight(), scope.getCentreY(), 1.0f);
+            g.drawLine(scope.getX() + scope.getWidth() * 0.15f, scope.getBottom() - scope.getHeight() * 0.15f,
+                       scope.getRight() - scope.getWidth() * 0.15f, scope.getY() + scope.getHeight() * 0.15f, 1.0f);
+            juce::Path cloud;
+            constexpr int points = 160;
+            for (int i = 0; i < points; ++i)
+            {
+                const float sx = juce::jlimit(-1.0f, 1.0f, processor.scopeXAt(i));
+                const float sy = juce::jlimit(-1.0f, 1.0f, processor.scopeYAt(i));
+                const float x = scope.getCentreX() + sx * scope.getWidth() * 0.46f;
+                const float y = scope.getCentreY() - sy * scope.getHeight() * 0.46f;
+                if (i == 0) cloud.startNewSubPath(x, y); else cloud.lineTo(x, y);
+            }
+            g.setColour(HFXColours::orange.withAlpha(0.82f));
+            g.strokePath(cloud, juce::PathStrokeType(1.4f));
+            g.setColour(HFXColours::muted);
+            g.drawText("LEFT / RIGHT STEREO IMAGE", (int)r.getX() + 12, (int)r.getBottom() - 20, (int)r.getWidth() - 24, 14, juce::Justification::centred);
+        }
+        else if (mode == 4) // Limiter ceiling + output waveform
+        {
+            const float ceiling = processor.limiterCeilingDb();
+            const float ceilingNorm = juce::jlimit(0.0f, 1.0f, juce::Decibels::decibelsToGain(ceiling));
+            const float ceilingY = plot.getCentreY() - ceilingNorm * plot.getHeight() * 0.46f;
+            g.setColour(HFXColours::orange.withAlpha(0.7f));
+            g.drawHorizontalLine((int)ceilingY, plot.getX(), plot.getRight());
+            g.drawHorizontalLine((int)(plot.getCentreY() * 2.0f - ceilingY), plot.getX(), plot.getRight());
+            juce::Path wave;
+            constexpr int points = 256;
+            for (int i = 0; i < points; ++i)
+            {
+                const float sample = juce::jlimit(-1.0f, 1.0f, processor.waveformAt(i));
+                const float x = plot.getX() + (float)i / (float)(points - 1) * plot.getWidth();
+                const float y = plot.getCentreY() - sample * plot.getHeight() * 0.46f;
+                if (i == 0) wave.startNewSubPath(x, y); else wave.lineTo(x, y);
+            }
+            g.setColour(HFXColours::muted);
+            g.drawLine(plot.getX(), plot.getCentreY(), plot.getRight(), plot.getCentreY(), 1.0f);
+            g.setColour(HFXColours::orange);
+            g.strokePath(wave, juce::PathStrokeType(1.5f));
+            g.setColour(HFXColours::muted);
+            g.drawText("OUTPUT PEAK / CEILING", (int)plot.getX(), (int)plot.getBottom() + 5, (int)plot.getWidth(), 16, juce::Justification::centred);
+        }
         return;
     }
 
@@ -377,9 +464,8 @@ void HFXAudioProcessorEditor::applyPreset(int id)
 
 void HFXAudioProcessorEditor::timerCallback()
 {
-    // Repaint only the graph; FFT calculation remains on the audio thread.
-    if (activeTab == 0)
-        spectrumView.repaint();
+    // Repaint the active module display; audio analysis remains on the audio thread.
+    spectrumView.repaint();
 }
 
 void HFXAudioProcessorEditor::paint(juce::Graphics& g)
