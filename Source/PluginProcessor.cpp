@@ -340,7 +340,7 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
         auto* d = buffer.getWritePointer(c);
         for (int n = 0; n < samples; ++n)
         {
-            float x = d[n] * inGain;
+            float x = d[n];
             for (int band = 0; band < 8; ++band)
                 for (int stage = 0; stage < 4; ++stage)
                     x = eq[(size_t)c][(size_t)band][(size_t)stage].process(x);
@@ -366,6 +366,9 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
             const float saturated = 0.5f * (std::tanh(x * drive * tilt + bias)
                                              + std::tanh(x * drive * tilt - bias));
             x = x * (1.0f - satMix) + saturated * satMix;
+
+            // Limiter input gain is applied immediately before peak limiting.
+            x *= inGain;
 
             // Fast-attack, release-smoothed sample-peak gain control.
             const float ceiling = juce::Decibels::decibelsToGain(pCeiling->load());

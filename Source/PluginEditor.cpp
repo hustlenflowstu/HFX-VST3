@@ -50,10 +50,26 @@ void HFXSpectrumView::paint(juce::Graphics& g)
 
     if (displayMode != 0)
     {
+        g.setColour(HFXColours::grid);
+        g.drawRoundedRectangle(r.reduced(1.0f), 6.0f, 1.0f);
+        const juce::String titles[] {
+            "EQ", "COMPRESSOR", "SATURATOR", "PAN & WIDTH", "LIMITER"
+        };
+        const juce::String descriptions[] {
+            "", "THRESHOLD  •  RATIO  •  ATTACK  •  RELEASE",
+            "DRIVE  •  TONE  •  WARMTH  •  MIX",
+            "STEREO WIDTH  •  LEFT PAN  •  RIGHT PAN",
+            "INPUT GAIN  •  CEILING  •  RELEASE"
+        };
+        g.setColour(HFXColours::orange);
+        g.setFont(juce::Font(20.0f, juce::Font::bold));
+        g.drawText(titles[juce::jlimit(0, 4, displayMode)],
+                   r.removeFromTop(r.getHeight() * 0.48f).toNearestInt(),
+                   juce::Justification::centred);
         g.setColour(HFXColours::muted);
-        g.setFont(14.0f);
-        const juce::String labels[] { "EQ", "COMPRESSOR", "SATURATOR", "PAN & WIDTH", "LIMITER" };
-        g.drawText(labels[juce::jlimit(0, 4, displayMode)], r.toNearestInt(), juce::Justification::centred);
+        g.setFont(12.0f);
+        g.drawText(descriptions[juce::jlimit(0, 4, displayMode)],
+                   r.toNearestInt(), juce::Justification::centred);
         return;
     }
 
@@ -268,7 +284,7 @@ void HFXAudioProcessorEditor::rebuildAttachments()
     }
     for (int i = 0; i < 10; ++i)
     {
-        const bool used = (activeTab != 0) && (activeTab == 3 ? i < 3 : i < 4);
+        const bool used = (activeTab != 0) && ((activeTab == 3 || activeTab == 4) ? i < 3 : i < 4);
         knobLabels[(size_t)i].setVisible(used);
         knobs[(size_t)i].setVisible(used);
         if (used)
@@ -436,12 +452,12 @@ void HFXAudioProcessorEditor::resized()
     }
     else for (auto& selector : eqFilterType) selector.setBounds(0, 0, 0, 0);
     const int available = getWidth() - 210;
-    const int count = activeTab == 0 ? 5 : (activeTab == 3 ? 3 : 4);
+    const int count = activeTab == 0 ? 5 : ((activeTab == 3 || activeTab == 4) ? 3 : 4);
     const int cell = available / count;
     const int startX = 105;
     for (int i = 0; i < 10; ++i)
     {
-        const bool used = (activeTab != 0) && (activeTab == 3 ? i < 3 : i < 4);
+        const bool used = (activeTab != 0) && ((activeTab == 3 || activeTab == 4) ? i < 3 : i < 4);
         if (!used) { knobLabels[(size_t)i].setBounds(0, 0, 0, 0); knobs[(size_t)i].setBounds(0, 0, 0, 0); continue; }
         const int row = activeTab == 0 ? i / 5 : 0;
         const int col = activeTab == 0 ? i % 5 : i;

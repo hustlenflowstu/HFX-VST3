@@ -55,14 +55,14 @@ private:
         {{ "threshold", "ratio", "attack", "release", "threshold", "threshold", "ratio", "attack", "release", "threshold" }},
         {{ "drive", "tone", "warmth", "satMix", "drive", "drive", "tone", "warmth", "satMix", "drive" }},
         {{ "width", "leftPan", "rightPan", "width", "width", "width", "leftPan", "rightPan", "width", "width" }},
-        {{ "inputGain", "ceiling", "limitRelease", "inputGain", "ceiling", "inputGain", "ceiling", "limitRelease", "inputGain", "ceiling" }}
+        {{ "inputGain", "ceiling", "limitRelease", "inputGain", "ceiling", "limitRelease", "inputGain", "ceiling", "limitRelease", "inputGain" }}
     }};
     const std::array<std::array<const char*, 10>, 5> names {{
         {{ "LOW FREQ", "LOW-MID FREQ", "MID FREQ", "HIGH-MID FREQ", "HIGH FREQ", "LOW GAIN", "LOW-MID GAIN", "MID GAIN", "HIGH-MID GAIN", "HIGH GAIN" }},
         {{ "THRESHOLD", "RATIO", "ATTACK", "RELEASE", "KNEE", "THRESHOLD", "RATIO", "ATTACK", "RELEASE", "KNEE" }},
         {{ "DRIVE", "TONE", "WARMTH", "MIX", "OUTPUT", "DRIVE", "TONE", "WARMTH", "MIX", "OUTPUT" }},
         {{ "WIDTH", "LEFT PAN", "RIGHT PAN", "—", "—", "WIDTH", "LEFT PAN", "RIGHT PAN", "—", "—" }},
-        {{ "INPUT GAIN", "CEILING", "RELEASE", "TRANSIENT", "OUTPUT", "INPUT GAIN", "CEILING", "RELEASE", "TRANSIENT", "OUTPUT" }}
+        {{ "INPUT GAIN", "CEILING", "RELEASE", "—", "—", "—", "—", "—", "—", "—" }}
     }};
 
     void selectTab(int);
