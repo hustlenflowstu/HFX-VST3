@@ -1,0 +1,12 @@
+HFX BUILD FIX 1
+===============
+
+Fixed the two compiler errors shown in the 25 Nov 2026 GitHub Actions screenshot.
+PluginEditor.cpp declared minHz and maxHz twice in the same function.
+The second duplicate declaration (previously around line 86) has been removed.
+The original declaration near the start of the spectrum drawing section remains
+and is shared by both the live spectrum and EQ response curve.
+
+The C4996 JUCE Font messages are warnings, not the build-stopping errors shown.
+This source patch has not been compiled or tested in Ableton. Re-run GitHub Actions
+and share the next build log if any errors remain.

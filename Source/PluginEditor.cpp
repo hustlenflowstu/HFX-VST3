@@ -83,7 +83,6 @@ void HFXSpectrumView::paint(juce::Graphics& g)
     g.strokePath(liveSpectrum, juce::PathStrokeType(1.35f));
 
     juce::Path response;
-    constexpr float minHz = 20.0f, maxHz = 20000.0f;
     for (int i = 0; i < 200; ++i)
     {
         const float t = (float)i / 199.0f;
