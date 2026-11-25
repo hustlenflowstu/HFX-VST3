@@ -35,8 +35,11 @@ private:
     std::array<juce::TextButton, 5> tabs;
     std::array<juce::Slider, 10> knobs;
     std::array<juce::Label, 10> knobLabels;
-    std::array<juce::ComboBox, 5> eqFilterType;
-    std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>, 5> eqFilterAttachments;
+    std::array<juce::ComboBox, 8> eqFilterType;
+    std::array<juce::Slider, 24> eqKnobs;
+    std::array<juce::Label, 24> eqKnobLabels;
+    std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>, 24> eqAttachments;
+    std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>, 8> eqFilterAttachments;
     std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>, 10> attachments;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> stemRoleAttachment;

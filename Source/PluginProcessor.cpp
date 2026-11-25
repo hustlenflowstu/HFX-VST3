@@ -91,11 +91,12 @@ HFXAudioProcessor::HFXAudioProcessor()
     pEqFreq = apvts.getRawParameterValue("eqFreq");
     pEqGain = apvts.getRawParameterValue("eqGain");
     pEqQ = apvts.getRawParameterValue("eqQ");
-    for (int band = 0; band < 5; ++band)
+    for (int band = 0; band < 8; ++band)
     {
         pEqBandFreq[(size_t)band] = apvts.getRawParameterValue("eqBandFreq" + juce::String(band));
         pEqBandGain[(size_t)band] = apvts.getRawParameterValue("eqBandGain" + juce::String(band));
         pEqBandType[(size_t)band] = apvts.getRawParameterValue("eqBandType" + juce::String(band));
+        pEqBandQ[(size_t)band] = apvts.getRawParameterValue("eqBandQ" + juce::String(band));
     }
     pThreshold = apvts.getRawParameterValue("threshold");
     pRatio = apvts.getRawParameterValue("ratio");
@@ -134,20 +135,21 @@ juce::AudioProcessorValueTreeState::ParameterLayout HFXAudioProcessor::makeParam
     f("eqFreq", "EQ Frequency", { 30.0f, 18000.0f, 1.0f, 0.35f }, 250.0f, "Hz");
     f("eqGain", "EQ Gain", { -18.0f, 18.0f, 0.1f }, 0.0f, "dB");
     f("eqQ", "EQ Q", { 0.2f, 8.0f, 0.01f }, 1.0f);
-    const float bandHz[5] { 80.0f, 250.0f, 1000.0f, 5000.0f, 12000.0f };
-    const char* bandNames[5] { "Low", "Low Mid", "Mid", "High Mid", "High" };
-    for (int band = 0; band < 5; ++band)
+    const float bandHz[8] { 35.0f, 90.0f, 180.0f, 400.0f, 1000.0f, 3000.0f, 8000.0f, 15000.0f };
+    const char* bandNames[8] { "Band 1", "Band 2", "Band 3", "Band 4", "Band 5", "Band 6", "Band 7", "Band 8" };
+    for (int band = 0; band < 8; ++band)
     {
         const auto suffix = String(band);
         f("eqBandFreq" + suffix, String(bandNames[band]) + " Frequency", { 20.0f, 20000.0f, 1.0f, 0.35f }, bandHz[band], "Hz");
         f("eqBandGain" + suffix, String(bandNames[band]) + " Gain", { -18.0f, 18.0f, 0.1f }, 0.0f, "dB");
+        f("eqBandQ" + suffix, String(bandNames[band]) + " Q", { 0.1f, 18.0f, 0.01f, 0.35f }, 0.7071f);
         params.push_back(std::make_unique<AudioParameterChoice>(
             ParameterID { "eqBandType" + suffix, 1 },
             String(bandNames[band]) + " Filter Type",
             StringArray { "48 dB/oct Low Cut", "12 dB/oct Low Cut", "Low Shelf",
                           "Bell", "Notch", "High Shelf", "12 dB/oct High Cut",
                           "48 dB/oct High Cut" },
-            band == 0 ? 2 : (band == 4 ? 5 : 3)));
+            band == 0 ? 0 : (band == 7 ? 7 : (band == 1 ? 2 : 3))));
     }
     f("threshold", "Threshold", { -60.0f, 0.0f, 0.1f }, -18.0f, "dB");
     f("ratio", "Ratio", { 1.0f, 20.0f, 0.1f }, 4.0f, ":1");
@@ -217,7 +219,7 @@ bool HFXAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 void HFXAudioProcessor::updateParameters()
 {
     for (int ch = 0; ch < 2; ++ch)
-        for (int band = 0; band < 5; ++band)
+        for (int band = 0; band < 8; ++band)
         {
             const int type = (int)pEqBandType[(size_t)band]->load();
             const int stages = (type == 0 || type == 7) ? 4 : 1;
@@ -225,7 +227,7 @@ void HFXAudioProcessor::updateParameters()
             {
                 auto& filter = eq[(size_t)ch][(size_t)band][(size_t)stage];
                 if (stage < stages)
-                    filter.setFilter(sampleRateHz, pEqBandFreq[(size_t)band]->load(), 0.7071f,
+                    filter.setFilter(sampleRateHz, pEqBandFreq[(size_t)band]->load(), pEqBandQ[(size_t)band]->load(),
                                      pEqBandGain[(size_t)band]->load(), type == 0 ? 1 : (type == 7 ? 6 : type));
                 else
                     filter.setPeak(sampleRateHz, 1000.0f, 0.7071f, 0.0f);
@@ -309,7 +311,7 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
         for (int n = 0; n < samples; ++n)
         {
             float x = d[n] * inGain;
-            for (int band = 0; band < 5; ++band)
+            for (int band = 0; band < 8; ++band)
                 for (int stage = 0; stage < 4; ++stage)
                     x = eq[(size_t)c][(size_t)band][(size_t)stage].process(x);
 
@@ -421,7 +423,7 @@ float HFXAudioProcessor::spectrumAtFrequency(float hz) const noexcept
 
 void HFXAudioProcessor::setEqBandFromGraph(int band, float frequencyHz, float gainDb)
 {
-    if (band < 0 || band >= 5) return;
+    if (band < 0 || band >= 8) return;
     auto set = [this](const juce::String& id, float value)
     {
         if (auto* parameter = apvts.getParameter(id))
@@ -437,12 +439,17 @@ void HFXAudioProcessor::setEqBandFromGraph(int band, float frequencyHz, float ga
 
 float HFXAudioProcessor::eqBandFrequency(int band) const noexcept
 {
-    return (band >= 0 && band < 5) ? pEqBandFreq[(size_t)band]->load(std::memory_order_relaxed) : 1000.0f;
+    return (band >= 0 && band < 8) ? pEqBandFreq[(size_t)band]->load(std::memory_order_relaxed) : 1000.0f;
+}
+
+float HFXAudioProcessor::eqBandQ(int band) const noexcept
+{
+    return (band >= 0 && band < 8) ? pEqBandQ[(size_t)band]->load(std::memory_order_relaxed) : 0.7071f;
 }
 
 float HFXAudioProcessor::eqBandGain(int band) const noexcept
 {
-    return (band >= 0 && band < 5) ? pEqBandGain[(size_t)band]->load(std::memory_order_relaxed) : 0.0f;
+    return (band >= 0 && band < 8) ? pEqBandGain[(size_t)band]->load(std::memory_order_relaxed) : 0.0f;
 }
 
 float HFXAudioProcessor::waveformAt(int index) const noexcept

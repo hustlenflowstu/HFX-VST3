@@ -37,7 +37,7 @@ void HFXSpectrumView::mouseDown(const juce::MouseEvent& e)
     const auto r = getLocalBounds().toFloat();
     float best = 1.0e9f;
     draggedBand = -1;
-    for (int band = 0; band < 5; ++band)
+    for (int band = 0; band < 8; ++band)
     {
         const float t = std::log(processor.eqBandFrequency(band) / 20.0f) / std::log(20000.0f / 20.0f);
         const float x = r.getX() + t * r.getWidth();
@@ -100,7 +100,7 @@ void HFXSpectrumView::paint(juce::Graphics& g)
             const float t = (float)i / 239.0f;
             const float hz = minHz * std::pow(maxHz / minHz, t);
             float db = 0.0f;
-            for (int band = 0; band < 5; ++band)
+            for (int band = 0; band < 8; ++band)
             {
                 const float centre = processor.eqBandFrequency(band);
                 const float octaves = std::log2(hz / centre);
@@ -112,7 +112,7 @@ void HFXSpectrumView::paint(juce::Graphics& g)
         }
         g.setColour(HFXColours::orange.withAlpha(0.95f));
         g.strokePath(response, juce::PathStrokeType(2.2f));
-        for (int band = 0; band < 5; ++band)
+        for (int band = 0; band < 8; ++band)
         {
             const float t = std::log(processor.eqBandFrequency(band) / minHz) / std::log(maxHz / minHz);
             const float x = r.getX() + t * r.getWidth();
@@ -280,7 +280,7 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
         "48 dB/oct Low Cut", "12 dB/oct Low Cut", "Low Shelf", "Bell",
         "Notch", "High Shelf", "12 dB/oct High Cut", "48 dB/oct High Cut"
     };
-    for (int band = 0; band < 5; ++band)
+    for (int band = 0; band < 8; ++band)
     {
         auto& selector = eqFilterType[(size_t)band];
         selector.addItemList(filterNames, 1);
@@ -288,6 +288,24 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
         eqFilterAttachments[(size_t)band] =
             std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
                 processor.state(), "eqBandType" + juce::String(band), selector);
+    }
+    const juce::String eqControlNames[3] { "FREQ", "GAIN", "Q" };
+    for (int band = 0; band < 8; ++band)
+    {
+        for (int control = 0; control < 3; ++control)
+        {
+            const int index = band * 3 + control;
+            auto& slider = eqKnobs[(size_t)index];
+            slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+            slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 62, 17);
+            slider.setLookAndFeel(&laf);
+            addAndMakeVisible(slider);
+            eqKnobLabels[(size_t)index].setText(eqControlNames[control], juce::dontSendNotification);
+            eqKnobLabels[(size_t)index].setJustificationType(juce::Justification::centred);
+            eqKnobLabels[(size_t)index].setColour(juce::Label::textColourId, HFXColours::muted);
+            eqKnobLabels[(size_t)index].setFont(juce::Font(9.5f, juce::Font::bold));
+            addAndMakeVisible(eqKnobLabels[(size_t)index]);
+        }
     }
     status.setColour(juce::Label::textColourId, HFXColours::muted); addAndMakeVisible(status);
     leftMeterText.setColour(juce::Label::textColourId, HFXColours::orange);
@@ -302,6 +320,7 @@ HFXAudioProcessorEditor::~HFXAudioProcessorEditor()
 {
     stopTimer();
     for (auto& slider : knobs) slider.setLookAndFeel(nullptr);
+    for (auto& slider : eqKnobs) slider.setLookAndFeel(nullptr);
     setLookAndFeel(nullptr);
 }
 
@@ -330,9 +349,20 @@ void HFXAudioProcessorEditor::selectTab(int index)
 void HFXAudioProcessorEditor::rebuildAttachments()
 {
     for (auto& attachment : attachments) attachment.reset();
+    for (auto& attachment : eqAttachments) attachment.reset();
+    for (int i = 0; i < 24; ++i)
+    {
+        const int band = i / 3, control = i % 3;
+        const juce::String suffix = juce::String(band);
+        const juce::String parameter = control == 0 ? "eqBandFreq" + suffix : (control == 1 ? "eqBandGain" + suffix : "eqBandQ" + suffix);
+        eqKnobs[(size_t)i].setVisible(activeTab == 0);
+        eqKnobLabels[(size_t)i].setVisible(activeTab == 0);
+        if (activeTab == 0)
+            eqAttachments[(size_t)i] = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.state(), parameter, eqKnobs[(size_t)i]);
+    }
     for (int i = 0; i < 10; ++i)
     {
-        const bool used = (activeTab == 0) || (activeTab == 3 ? i < 3 : i < 4);
+        const bool used = (activeTab != 0) && (activeTab == 3 ? i < 3 : i < 4);
         knobLabels[(size_t)i].setVisible(used);
         knobs[(size_t)i].setVisible(used);
         if (used)
@@ -508,9 +538,21 @@ void HFXAudioProcessorEditor::resized()
     rmsText.setBounds(getWidth() - 110, 595, 100, 18);
     if (activeTab == 0)
     {
-        const int filterCell = (getWidth() - 90) / 5;
-        for (int band = 0; band < 5; ++band)
-            eqFilterType[(size_t)band].setBounds(35 + band * filterCell, graphBottom + 38, filterCell - 10, 28);
+        const int groupWidth = (getWidth() - 70) / 4;
+        for (int band = 0; band < 8; ++band)
+        {
+            const int row = band / 4, col = band % 4;
+            const int x = 35 + col * groupWidth;
+            const int y = graphBottom + 8 + row * 145;
+            eqFilterType[(size_t)band].setBounds(x + 4, y, groupWidth - 12, 24);
+            for (int control = 0; control < 3; ++control)
+            {
+                const int index = band * 3 + control;
+                const int knobX = x + 5 + control * ((groupWidth - 15) / 3);
+                eqKnobLabels[(size_t)index].setBounds(knobX, y + 27, (groupWidth - 15) / 3, 13);
+                eqKnobs[(size_t)index].setBounds(knobX, y + 39, (groupWidth - 15) / 3, 90);
+            }
+        }
     }
     else for (auto& selector : eqFilterType) selector.setBounds(0, 0, 0, 0);
     const int available = getWidth() - 210;
@@ -519,7 +561,7 @@ void HFXAudioProcessorEditor::resized()
     const int startX = 105;
     for (int i = 0; i < 10; ++i)
     {
-        const bool used = (activeTab == 0) || (activeTab == 3 ? i < 3 : i < 4);
+        const bool used = (activeTab != 0) && (activeTab == 3 ? i < 3 : i < 4);
         if (!used) { knobLabels[(size_t)i].setBounds(0, 0, 0, 0); knobs[(size_t)i].setBounds(0, 0, 0, 0); continue; }
         const int row = activeTab == 0 ? i / 5 : 0;
         const int col = activeTab == 0 ? i % 5 : i;

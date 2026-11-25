@@ -1,0 +1,27 @@
+HFX EQ8 DEVELOPMENT PATCH - 25 NOV 2026
+
+This source update expands the HFX equalizer DSP and parameter model from five bands to eight bands.
+Each band now has host-automatable Frequency, Gain, Q and Filter Type parameters.
+The eight filter choices remain:
+1. 48 dB/oct Low Cut
+2. 12 dB/oct Low Cut
+3. Low Shelf
+4. Bell
+5. Notch
+6. High Shelf
+7. 12 dB/oct High Cut
+8. 48 dB/oct High Cut
+
+The EQ editor now provides eight filter selectors and 24 rotary controls (Frequency, Gain, Q per band),
+and the graph displays eight draggable band nodes.
+The audio processing loop applies all eight EQ bands.
+
+Preset and Auto Mix code paths were intentionally not redesigned. Existing preset logic still sets its
+original five named EQ gains/frequencies; the additional bands retain their stored/default values.
+
+IMPORTANT VALIDATION STATUS:
+- Source changes applied to the supplied project.
+- CMake configure was attempted in the Linux environment but timed out while FetchContent was retrieving JUCE.
+- No successful compiler build or DAW runtime test is claimed.
+- Please build on Windows using BUILD_HFX_WINDOWS.bat or the repository GitHub Actions workflow.
+- Inspect compiler output before replacing an existing working installer.

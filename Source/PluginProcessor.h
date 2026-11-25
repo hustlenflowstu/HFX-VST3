@@ -44,6 +44,7 @@ public:
     void setEqBandFromGraph(int band, float frequencyHz, float gainDb);
     float eqBandFrequency(int band) const noexcept;
     float eqBandGain(int band) const noexcept;
+    float eqBandQ(int band) const noexcept;
     float waveformAt(int index) const noexcept;
     float scopeXAt(int index) const noexcept;
     float scopeYAt(int index) const noexcept;
@@ -67,10 +68,11 @@ private:
         float process(float x) noexcept;
         void reset() noexcept { z1 = z2 = 0.0f; }
     };
-    std::array<std::array<std::array<Biquad, 4>, 5>, 2> eq;
-    std::array<std::atomic<float>*, 5> pEqBandFreq {};
-    std::array<std::atomic<float>*, 5> pEqBandGain {};
-    std::array<std::atomic<float>*, 5> pEqBandType {};
+    std::array<std::array<std::array<Biquad, 4>, 8>, 2> eq;
+    std::array<std::atomic<float>*, 8> pEqBandFreq {};
+    std::array<std::atomic<float>*, 8> pEqBandGain {};
+    std::array<std::atomic<float>*, 8> pEqBandType {};
+    std::array<std::atomic<float>*, 8> pEqBandQ {};
     std::array<float, 2> compEnvelope { 0.0f, 0.0f };
     std::array<float, 2> limiterGain { 1.0f, 1.0f };
     juce::AudioBuffer<float> delayBuffer;
