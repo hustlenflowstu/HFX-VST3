@@ -322,6 +322,122 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
     startTimerHz(30);
 }
 
+void HFXAudioProcessorEditor::paint(juce::Graphics& g)
+{
+    g.fillAll(HFXColours::bg);
+    auto main = getLocalBounds().toFloat().reduced(16.0f);
+    g.setColour(HFXColours::panel); g.fillRoundedRectangle(main.withTrimmedTop(90.0f), 12.0f);
+    g.setColour(HFXColours::grid); g.drawRoundedRectangle(main.withTrimmedTop(90.0f), 12.0f, 1.0f);
+
+    const juce::String titles[] { "AUTO-EQ  /  FREQUENCY SHAPING", "COMPRESSOR  /  DYNAMIC CONTROL", "SATURATOR  /  HARMONIC COLOR", "PAN & WIDTH  /  STEREO FIELD", "LIMITER  /  PEAK CONTROL" };
+    g.setColour(HFXColours::orange); g.setFont(juce::Font(12.0f, juce::Font::bold));
+    g.drawText(titles[activeTab], 32, 155, 600, 22, juce::Justification::left);
+
+    // Soft multi-pass text glow for the HFX / HF identity.
+    g.setFont(juce::Font(42.0f, juce::Font::bold));
+    for (int pass = 12; pass >= 1; --pass)
+    {
+        g.setColour(HFXColours::orange.withAlpha(0.035f * (float)(13 - pass)));
+        g.drawText("HFX", 22 - pass, 13 - pass, 120 + pass * 2, 58 + pass * 2, juce::Justification::left);
+    }
+    for (int pass = 12; pass >= 1; --pass)
+    { g.setColour(HFXColours::orange.withAlpha(0.035f * (float)(13 - pass))); g.setFont(juce::Font(34.0f, juce::Font::bold)); g.drawText("HF", 28 - pass, getHeight() - 105 - pass, 62 + pass * 2, 48 + pass * 2, juce::Justification::centred); }
+    g.setColour(HFXColours::orange); g.setFont(juce::Font(34.0f, juce::Font::bold)); g.drawText("HF", 28, getHeight() - 105, 62, 48, juce::Justification::centred);
+
+    const int mx = getWidth() - 76;
+    g.setColour(HFXColours::panel2); g.fillRoundedRectangle((float)mx, 205.0f, 18.0f, 280.0f, 5.0f); g.fillRoundedRectangle((float)mx + 26.0f, 205.0f, 18.0f, 280.0f, 5.0f);
+    const float left = juce::jlimit(0.0f, 1.0f, (processor.leftPeakDb() + 60.0f) / 60.0f);
+    const float right = juce::jlimit(0.0f, 1.0f, (processor.rightPeakDb() + 60.0f) / 60.0f);
+    g.setColour(HFXColours::orange); g.fillRoundedRectangle((float)mx + 2.0f, 483.0f - left * 276.0f, 14.0f, left * 276.0f, 3.0f); g.fillRoundedRectangle((float)mx + 28.0f, 483.0f - right * 276.0f, 14.0f, right * 276.0f, 3.0f);
+    g.setColour(HFXColours::muted); g.setFont(10.0f); g.drawText("L", mx, 490, 18, 14, juce::Justification::centred); g.drawText("R", mx + 26, 490, 18, 14, juce::Justification::centred);
+}
+
+void HFXAudioProcessorEditor::timerCallback()
+{
+    // Refresh the active module display. Analysis data is produced by the audio processor.
+    spectrumView.repaint();
+}
+
+void HFXAudioProcessorEditor::applyPreset(int id)
+{
+    auto set = [this](const juce::String& key, float value)
+    {
+        if (auto* parameter = processor.state().getParameter(key))
+            parameter->setValueNotifyingHost(parameter->convertTo0to1(value));
+    };
+    const bool beat = trackMode.getSelectedId() == 2;
+    // All 50 presets, including the original first eight, now populate the live five-band EQ.
+    {
+        const int categoryForEq = juce::jlimit(0, 4, (id - 1) / 10);
+        const int variationForEq = (id - 1) % 10;
+        const float variationAmount = (float)variationForEq / 9.0f;
+        const float root = beat ? (categoryForEq == 4 ? 48.0f : 90.0f + categoryForEq * 80.0f)
+                                : 100.0f + categoryForEq * 110.0f;
+        for (int band = 0; band < 5; ++band)
+        {
+            const float freq = juce::jlimit(20.0f, 20000.0f, root * std::pow(2.0f, (float)band * (beat ? 1.55f : 1.7f)));
+            const float curve = (band == 0 ? -0.3f : band == 4 ? 0.25f : 0.1f) * (float)(categoryForEq + 1);
+            set("eqBandFreq" + juce::String(band), freq);
+            set("eqBandGain" + juce::String(band), juce::jlimit(-6.0f, 6.0f, (variationAmount - 0.5f) * 3.0f + curve));
+        }
+    }
+    if (id > 8)
+    {
+        // The additional entries are complete parameter snapshots, not labels-only presets.
+        const int category = (id - 1) / 10;
+        const int variation = (id - 1) % 10;
+        const float v = (float)variation / 9.0f;
+        const float baseFreq = beat ? (category == 4 ? 55.0f : 110.0f + category * 95.0f) : 120.0f + category * 90.0f;
+        const float baseGain = (v - 0.5f) * (beat ? 4.0f : 3.0f);
+        for (int band = 0; band < 5; ++band)
+        {
+            const float freq = juce::jlimit(20.0f, 20000.0f, baseFreq * std::pow(2.0f, (float)band * (beat ? 1.45f : 1.65f)));
+            const float shape = (band == 0 ? -0.25f : band == 4 ? 0.30f : 0.12f) * (float)(category + 1);
+            set("eqBandFreq" + juce::String(band), freq);
+            set("eqBandGain" + juce::String(band), juce::jlimit(-6.0f, 6.0f, baseGain + shape));
+        }
+        set("threshold", beat ? -16.0f - v * 8.0f : -19.0f - v * 7.0f);
+        set("ratio", beat ? 2.0f + category * 0.45f + v : 2.0f + category * 0.35f + v * 1.4f);
+        set("attack", beat ? 3.0f + v * 32.0f : 5.0f + v * 24.0f);
+        set("release", beat ? 45.0f + v * 130.0f : 65.0f + v * 115.0f);
+        set("drive", beat ? 1.0f + category * 0.55f + v * 2.0f : 0.5f + category * 0.45f + v * 1.5f);
+        set("tone", (v - 0.5f) * 0.5f); set("warmth", 0.1f + v * 0.35f);
+        set("satMix", 0.12f + v * 0.28f); set("width", beat ? 0.92f + v * 0.25f : 1.0f + v * 0.20f);
+        set("ceiling", -1.0f - v * 1.5f); set("inputGain", (0.5f - v) * 2.0f);
+        status.setText((beat ? "BEAT" : "VOCAL") + juce::String(" PRESET LOADED — CATEGORY ") + juce::String(category + 1) + " / VARIATION " + juce::String(variation + 1), juce::dontSendNotification);
+        return;
+    }
+    if (!beat)
+    {
+        switch (id)
+        {
+            case 1: set("eqFreq", 320); set("eqGain", -1.5f); set("eqQ", 1.1f); set("threshold", -20); set("ratio", 3); set("attack", 15); set("release", 100); set("drive", 1); set("satMix", .15f); set("width", 1.02f); set("ceiling", -1); break;
+            case 2: set("eqFreq", 240); set("eqGain", -1); set("eqQ", .9f); set("threshold", -22); set("ratio", 2.8f); set("attack", 22); set("release", 130); set("drive", 1.4f); set("satMix", .18f); set("width", 1.04f); break;
+            case 3: set("eqFreq", 280); set("eqGain", -1); set("threshold", -22); set("ratio", 4); set("attack", 8); set("release", 85); set("drive", 2); set("satMix", .25f); set("width", 1.08f); break;
+            case 4: set("eqFreq", 350); set("eqGain", -1.2f); set("threshold", -21); set("ratio", 4.5f); set("attack", 6); set("release", 75); set("drive", 3); set("satMix", .30f); set("width", 1.05f); break;
+            case 5: set("eqFreq", 420); set("eqGain", -1.8f); set("threshold", -24); set("ratio", 2.5f); set("attack", 18); set("release", 145); set("drive", .8f); set("tone", .18f); set("satMix", .12f); set("width", 1.12f); break;
+            case 6: set("eqFreq", 5200); set("eqGain", 1.2f); set("threshold", -20); set("ratio", 2.5f); set("attack", 12); set("release", 95); set("drive", 1.2f); set("tone", .25f); set("width", 1.06f); break;
+            case 7: set("eqFreq", 300); set("eqGain", -1); set("threshold", -24); set("ratio", 3.5f); set("attack", 5); set("release", 65); set("drive", 2.5f); set("satMix", .24f); set("width", 1.35f); break;
+            case 8: set("eqFreq", 380); set("eqGain", -2); set("threshold", -25); set("ratio", 6); set("attack", 3); set("release", 60); set("drive", 4); set("satMix", .38f); set("width", 1.08f); break;
+        }
+    }
+    else
+    {
+        switch (id)
+        {
+            case 1: set("eqFreq", 250); set("eqGain", -.8f); set("threshold", -16); set("ratio", 3); set("attack", 25); set("release", 110); set("drive", 2.5f); set("satMix", .25f); set("width", 1.12f); break;
+            case 2: set("eqFreq", 180); set("eqGain", 1); set("threshold", -14); set("ratio", 3); set("attack", 30); set("release", 120); set("drive", 2); set("satMix", .20f); set("width", 1.05f); break;
+            case 3: set("eqFreq", 220); set("eqGain", -.5f); set("threshold", -17); set("ratio", 4); set("attack", 18); set("release", 90); set("drive", 3.2f); set("satMix", .28f); set("width", 1.16f); break;
+            case 4: set("eqFreq", 300); set("eqGain", -1.2f); set("threshold", -19); set("ratio", 2.5f); set("attack", 32); set("release", 145); set("drive", 1.4f); set("satMix", .16f); set("width", 1.0f); break;
+            case 5: set("eqFreq", 260); set("eqGain", -.8f); set("threshold", -18); set("ratio", 2.8f); set("attack", 24); set("release", 125); set("drive", 1.5f); set("tone", -.12f); set("width", 1.08f); break;
+            case 6: set("eqFreq", 500); set("eqGain", -2); set("threshold", -22); set("ratio", 2); set("attack", 35); set("release", 180); set("drive", 3.8f); set("warmth", .4f); set("satMix", .32f); set("width", .92f); break;
+            case 7: set("eqFreq", 280); set("eqGain", -.6f); set("threshold", -16); set("ratio", 3); set("attack", 20); set("release", 100); set("drive", 2.2f); set("satMix", .22f); set("width", 1.18f); break;
+            case 8: set("eqFreq", 320); set("eqGain", -.8f); set("threshold", -18); set("ratio", 2.2f); set("attack", 28); set("release", 130); set("drive", 1); set("satMix", .1f); set("width", 1.02f); break;
+        }
+    }
+    status.setText((beat ? "BEAT" : "VOCAL") + juce::String(" PRESET LOADED — ADJUST TO TASTE"), juce::dontSendNotification);
+}
+
 HFXAudioProcessorEditor::~HFXAudioProcessorEditor()
 {
 }
