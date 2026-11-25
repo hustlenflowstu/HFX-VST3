@@ -1,0 +1,24 @@
+HFX EQ8 BUILD FIX - 2026-11-25
+
+The supplied GitHub Actions log showed these fatal compiler errors:
+- PluginProcessor.cpp:230: freqParam undeclared
+- PluginProcessor.cpp:231: qParam undeclared
+- PluginProcessor.cpp:232: gainParam undeclared
+- PluginProcessor.cpp:230: cascading Biquad::setFilter overload error
+
+Fix applied:
+- Resolve the per-band frequency, Q, gain and filter-type parameter pointers
+  from the existing 8-band parameter arrays inside updateParameters().
+- Check those pointers before dereferencing.
+- Use the per-band atomic values as the five arguments expected by
+  Biquad::setFilter(sampleRate, frequency, Q, gainDb, type).
+- Preserve the existing 8-band parameter IDs and filter implementation.
+
+The C4996 juce::Font warnings in PluginEditor.cpp and CustomLookAndFeel.cpp
+are warnings, not the cause of this failed build. The fatal C2065/C2660 errors
+were the cause.
+
+IMPORTANT:
+This source correction addresses the compiler errors visible in the supplied
+log. It has not been compiled in this environment and is not a verified VST3
+binary. Build it with the existing GitHub Actions workflow before installing.

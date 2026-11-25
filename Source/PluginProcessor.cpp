@@ -221,13 +221,21 @@ void HFXAudioProcessor::updateParameters()
     for (int ch = 0; ch < 2; ++ch)
         for (int band = 0; band < 8; ++band)
         {
-            const int type = (int)pEqBandType[(size_t)band]->load();
+            auto* typeParam = pEqBandType[(size_t)band];
+            auto* freqParam = pEqBandFreq[(size_t)band];
+            auto* gainParam = pEqBandGain[(size_t)band];
+            auto* qParam = pEqBandQ[(size_t)band];
+            if (typeParam == nullptr || freqParam == nullptr || gainParam == nullptr || qParam == nullptr)
+                continue;
+
+            const int type = (int)typeParam->load(std::memory_order_relaxed);
             const int stages = (type == 0 || type == 7) ? 4 : 1;
             for (int stage = 0; stage < 4; ++stage)
             {
                 auto& filter = eq[(size_t)ch][(size_t)band][(size_t)stage];
                 if (stage < stages)
-                    filter.setFilter(sampleRateHz, freqParam->load(std::memory_order_relaxed),
+                    filter.setFilter(sampleRateHz,
+                                     freqParam->load(std::memory_order_relaxed),
                                      qParam->load(std::memory_order_relaxed),
                                      gainParam->load(std::memory_order_relaxed),
                                      type == 0 ? 1 : (type == 7 ? 6 : type));
