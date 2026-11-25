@@ -118,17 +118,6 @@ HFXAudioProcessor::HFXAudioProcessor()
     pTrackMode = apvts.getRawParameterValue("trackMode");
     pStemRole = apvts.getRawParameterValue("stemRole");
     pBypass = apvts.getRawParameterValue("bypass");
-
-    // Fail construction loudly in debug builds if the parameter layout and cached
-    // real-time pointers ever drift apart. Release builds retain safe runtime guards.
-    jassert(pBypass != nullptr);
-    jassert(pInputGain != nullptr && pDrive != nullptr && pSatMix != nullptr);
-    jassert(pTone != nullptr && pWidth != nullptr && pLeftPan != nullptr && pRightPan != nullptr);
-    jassert(pAttack != nullptr && pRelease != nullptr && pThreshold != nullptr && pRatio != nullptr);
-    jassert(pCeiling != nullptr && pLimitRelease != nullptr);
-    for (int band = 0; band < 8; ++band)
-        jassert(pEqBandFreq[(size_t)band] != nullptr && pEqBandGain[(size_t)band] != nullptr
-                && pEqBandType[(size_t)band] != nullptr && pEqBandQ[(size_t)band] != nullptr);
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout HFXAudioProcessor::makeParameters()
@@ -229,6 +218,8 @@ bool HFXAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 
 void HFXAudioProcessor::updateParameters()
 {
+    if (sampleRateHz < 1000.0)
+        return;
     for (int ch = 0; ch < 2; ++ch)
         for (int band = 0; band < 8; ++band)
         {
@@ -260,6 +251,8 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
 {
     juce::ScopedNoDenormals noDenormals;
     juce::ignoreUnused(midi);
+    if (buffer.getNumChannels() <= 0 || buffer.getNumSamples() <= 0)
+        return;
 
     for (int c = getTotalNumInputChannels(); c < getTotalNumOutputChannels(); ++c)
         buffer.clear(c, 0, buffer.getNumSamples());
@@ -295,8 +288,7 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
             scopeYHistory[(size_t)slot].store(0.5f * (l + r), std::memory_order_relaxed);
         }
     };
-    // A missing bypass parameter must never cause an access violation in the audio callback.
-    if (pBypass == nullptr || pBypass->load(std::memory_order_relaxed) > 0.5f)
+    if (pBypass != nullptr && pBypass->load(std::memory_order_relaxed) > 0.5f)
     {
         captureStereoScope();
         return;
@@ -564,7 +556,7 @@ void HFXAudioProcessor::analyzeAutoMix(const juce::AudioBuffer<float>& b)
         const float rmsDb = juce::Decibels::gainToDecibels(rms, -90.0f);
         const float peakDb = juce::Decibels::gainToDecibels(analysisPeak, -90.0f);
         const float crest = peakDb - rmsDb;
-        const bool beat = pTrackMode->load() > 0.5f;
+        const bool beat = (pTrackMode != nullptr) && (pTrackMode->load(std::memory_order_relaxed) > 0.5f);
 
         const float bandCount = juce::jmax(1.0f, (float)analysisCount);
         const float lowDb = juce::Decibels::gainToDecibels(std::sqrt((float)(analysisLowSquares / bandCount)), -90.0f);

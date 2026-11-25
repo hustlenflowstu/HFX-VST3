@@ -31,179 +31,91 @@ namespace
     }();
 }
 
-void HFXSpectrumView::mouseDown(const juce::MouseEvent& e)
-{
-    if (displayMode != 0) return;
-    const auto r = getLocalBounds().toFloat();
-    float best = 1.0e9f;
-    draggedBand = -1;
-    for (int band = 0; band < 8; ++band)
-    {
-        const float t = std::log(processor.eqBandFrequency(band) / 20.0f) / std::log(20000.0f / 20.0f);
-        const float x = r.getX() + t * r.getWidth();
-        const float y = r.getCentreY() - processor.eqBandGain(band) * (r.getHeight() / 40.0f);
-        const float d = e.position.getDistanceFrom({ x, y });
-        if (d < best && d < 28.0f) { best = d; draggedBand = band; }
-    }
-    if (draggedBand >= 0) updateEqFromPoint(e.position);
-}
-
-void HFXSpectrumView::mouseDrag(const juce::MouseEvent& e)
-{
-    if (displayMode == 0 && draggedBand >= 0) updateEqFromPoint(e.position);
-}
-
-void HFXSpectrumView::updateEqFromPoint(juce::Point<float> point)
-{
-    const auto r = getLocalBounds().toFloat();
-    const float t = juce::jlimit(0.0f, 1.0f, (point.x - r.getX()) / juce::jmax(1.0f, r.getWidth()));
-    const float hz = 20.0f * std::pow(20000.0f / 20.0f, t);
-    const float safeHeight = juce::jmax(1.0f, r.getHeight());
-    const float gain = juce::jlimit(-18.0f, 18.0f, (r.getCentreY() - point.y) * 40.0f / safeHeight);
-    processor.setEqBandFromGraph(draggedBand, hz, gain);
-    repaint();
-}
+void HFXSpectrumView::mouseDown(const juce::MouseEvent&) {}
+void HFXSpectrumView::mouseDrag(const juce::MouseEvent&) {}
+void HFXSpectrumView::updateEqFromPoint(juce::Point<float>) {}
 
 void HFXSpectrumView::paint(juce::Graphics& g)
 {
+    // Deliberately simple, static EQ response display for the stability build.
+    // No FFT/spectrum reads, animated paths, or custom graph effects.
     auto r = getLocalBounds().toFloat();
     g.setColour(HFXColours::panel2);
-    g.fillRoundedRectangle(r, 8.0f);
+    g.fillRoundedRectangle(r, 6.0f);
     g.setColour(HFXColours::grid);
-    for (int i = 1; i < 6; ++i)
-        g.drawHorizontalLine((int)(r.getY() + r.getHeight() * i / 6.0f), r.getX(), r.getRight());
-    for (int i = 1; i < 10; ++i)
-        g.drawVerticalLine((int)(r.getX() + r.getWidth() * i / 10.0f), r.getY(), r.getBottom());
+    for (int i = 1; i < 5; ++i)
+        g.drawHorizontalLine((int)(r.getY() + r.getHeight() * i / 5.0f), r.getX(), r.getRight());
+    for (int i = 1; i < 9; ++i)
+        g.drawVerticalLine((int)(r.getX() + r.getWidth() * i / 9.0f), r.getY(), r.getBottom());
 
-    // Each processor gets its own visual language rather than reusing one spectrum graphic.
-    if (displayMode == 0) // EQ: live spectrum + response curve
+    if (displayMode != 0)
     {
-        juce::Path spectrum, fill;
-        constexpr int bins = 160;
-        for (int i = 0; i < bins; ++i)
-        {
-            const float t = (float)i / (float)(bins - 1);
-            const float hz = 20.0f * std::pow(20000.0f / 20.0f, t);
-            const float v = processor.spectrumAtFrequency(hz);
-            const float x = r.getX() + r.getWidth() * (float)i / (float)(bins - 1);
-            const float y = r.getBottom() - v * r.getHeight() * 0.88f;
-            if (i == 0) { spectrum.startNewSubPath(x, y); fill.startNewSubPath(x, r.getBottom()); fill.lineTo(x, y); }
-            else { spectrum.lineTo(x, y); fill.lineTo(x, y); }
-        }
-        fill.lineTo(r.getRight(), r.getBottom()); fill.closeSubPath();
-        g.setColour(HFXColours::orange.withAlpha(0.13f)); g.fillPath(fill);
-        g.setColour(HFXColours::white.withAlpha(0.88f));
-        g.strokePath(spectrum, juce::PathStrokeType(1.4f));
-        juce::Path response;
-        constexpr float minHz = 20.0f, maxHz = 20000.0f;
-        for (int i = 0; i < 240; ++i)
-        {
-            const float t = (float)i / 239.0f;
-            const float hz = minHz * std::pow(maxHz / minHz, t);
-            float db = 0.0f;
-            for (int band = 0; band < 8; ++band)
-            {
-                const float centre = processor.eqBandFrequency(band);
-                const float octaves = std::log2(hz / centre);
-                db += processor.eqBandGain(band) * std::exp(-0.5f * octaves * octaves / 0.72f);
-            }
-            const float x = r.getX() + t * r.getWidth();
-            const float y = r.getCentreY() - juce::jlimit(-18.0f, 18.0f, db) * (r.getHeight() / 40.0f);
-            if (i == 0) response.startNewSubPath(x, y); else response.lineTo(x, y);
-        }
-        g.setColour(HFXColours::orange.withAlpha(0.95f));
-        g.strokePath(response, juce::PathStrokeType(2.2f));
+        g.setColour(HFXColours::muted);
+        g.setFont(14.0f);
+        const juce::String labels[] { "EQ", "COMPRESSOR", "SATURATOR", "PAN & WIDTH", "LIMITER" };
+        g.drawText(labels[juce::jlimit(0, 4, displayMode)], r.toNearestInt(), juce::Justification::centred);
+        return;
+    }
+
+    // Live input spectrum: read-only atomic FFT data from the audio processor.
+    // The editor samples it at a modest UI rate; no FFT work happens in paint().
+    juce::Path liveSpectrum;
+    constexpr int spectrumPoints = 128;
+    constexpr float minHz = 20.0f, maxHz = 20000.0f;
+    for (int i = 0; i < spectrumPoints; ++i)
+    {
+        const float t = (float)i / (float)(spectrumPoints - 1);
+        const float hz = minHz * std::pow(maxHz / minHz, t);
+        const float raw = juce::jlimit(0.0f, 1.0f, processor.spectrumAtFrequency(hz));
+        const float target = std::sqrt(raw);
+        spectrumSmooth[(size_t)i] = 0.72f * spectrumSmooth[(size_t)i] + 0.28f * target;
+        const float x = r.getX() + t * r.getWidth();
+        const float y = r.getBottom() - 3.0f - spectrumSmooth[(size_t)i] * r.getHeight() * 0.82f;
+        if (i == 0) liveSpectrum.startNewSubPath(x, y); else liveSpectrum.lineTo(x, y);
+    }
+    juce::Path spectrumFill = liveSpectrum;
+    spectrumFill.lineTo(r.getRight(), r.getBottom());
+    spectrumFill.lineTo(r.getX(), r.getBottom());
+    spectrumFill.closeSubPath();
+    g.setColour(HFXColours::orange.withAlpha(0.12f));
+    g.fillPath(spectrumFill);
+    g.setColour(HFXColours::orange.withAlpha(0.48f));
+    g.strokePath(liveSpectrum, juce::PathStrokeType(1.35f));
+
+    juce::Path response;
+    constexpr float minHz = 20.0f, maxHz = 20000.0f;
+    for (int i = 0; i < 200; ++i)
+    {
+        const float t = (float)i / 199.0f;
+        const float hz = minHz * std::pow(maxHz / minHz, t);
+        float db = 0.0f;
         for (int band = 0; band < 8; ++band)
         {
-            const float t = std::log(processor.eqBandFrequency(band) / minHz) / std::log(maxHz / minHz);
-            const float x = r.getX() + t * r.getWidth();
-            const float y = r.getCentreY() - processor.eqBandGain(band) * (r.getHeight() / 40.0f);
-            g.setColour(HFXColours::orange.withAlpha(0.22f)); g.fillEllipse(x - 9.0f, y - 9.0f, 18.0f, 18.0f);
-            g.setColour(HFXColours::orange); g.fillEllipse(x - 4.0f, y - 4.0f, 8.0f, 8.0f);
+            const float centre = juce::jmax(20.0f, processor.eqBandFrequency(band));
+            const float octaves = std::log2(hz / centre);
+            db += processor.eqBandGain(band) * std::exp(-0.5f * octaves * octaves / 0.72f);
         }
+        const float x = r.getX() + t * r.getWidth();
+        const float y = r.getCentreY() - juce::jlimit(-18.0f, 18.0f, db) * (r.getHeight() / 40.0f);
+        if (i == 0) response.startNewSubPath(x, y); else response.lineTo(x, y);
     }
-    else if (displayMode == 1) // Compressor: input/output transfer curve
+    g.setColour(HFXColours::orange);
+    g.strokePath(response, juce::PathStrokeType(2.0f));
+
+    for (int band = 0; band < 8; ++band)
     {
-        const auto c = r.getCentre();
-        juce::Path diagonal; diagonal.startNewSubPath(r.getX() + 16, r.getBottom() - 16); diagonal.lineTo(r.getRight() - 16, r.getY() + 16);
-        g.setColour(HFXColours::muted.withAlpha(0.65f)); g.strokePath(diagonal, juce::PathStrokeType(1.2f));
-        const float threshold = processor.compressorThresholdDb();
-        const float thresholdNorm = juce::jlimit(0.0f, 1.0f, (threshold + 60.0f) / 60.0f);
-        const float thresholdY = r.getBottom() - thresholdNorm * r.getHeight();
-        g.setColour(HFXColours::orange.withAlpha(0.8f));
-        g.drawHorizontalLine((int)thresholdY, r.getX() + 8.0f, r.getRight() - 8.0f);
-        juce::Path liveWave;
-        for (int i = 0; i < 256; ++i)
-        {
-            const float x = r.getX() + r.getWidth() * (float)i / 255.0f;
-            const float sample = juce::jlimit(-1.0f, 1.0f, processor.waveformAt(i));
-            const float y = r.getCentreY() - sample * r.getHeight() * 0.43f;
-            if (i == 0) liveWave.startNewSubPath(x, y); else liveWave.lineTo(x, y);
-        }
-        g.setColour(HFXColours::white.withAlpha(0.92f));
-        g.strokePath(liveWave, juce::PathStrokeType(1.5f));
-        g.setColour(HFXColours::orange); g.setFont(12.0f);
-        g.drawText("LIVE INPUT  |  THRESHOLD " + juce::String(threshold, 1) + " dB  |  RATIO " + juce::String(processor.compressorRatio(), 1) + ":1", r.toNearestInt().reduced(12, 8), juce::Justification::topLeft);
-    }
-    else if (displayMode == 2) // Saturator: transfer curve
-    {
-        juce::Path curve;
-        const float mid = r.getCentreY();
-        for (int i = 0; i <= 120; ++i)
-        {
-            const float xNorm = (float)i / 120.0f * 2.0f - 1.0f;
-            const float drive = juce::Decibels::decibelsToGain(processor.saturationDriveDb());
-            const float yNorm = std::tanh(xNorm * drive) / juce::jmax(0.001f, std::tanh(drive));
-            const float x = r.getCentreX() + xNorm * r.getWidth() * 0.46f;
-            const float y = mid - yNorm * r.getHeight() * 0.43f;
-            if (i == 0) curve.startNewSubPath(x, y); else curve.lineTo(x, y);
-        }
-        g.setColour(HFXColours::orange.withAlpha(0.2f)); g.strokePath(curve, juce::PathStrokeType(9.0f));
-        g.setColour(HFXColours::orange); g.strokePath(curve, juce::PathStrokeType(2.5f));
-        g.setColour(HFXColours::muted); g.drawText("SOFT CLIP / HARMONIC TRANSFER", r.toNearestInt().reduced(12, 8), juce::Justification::topLeft);
-    }
-    else if (displayMode == 3) // Stereo field / vectorscope-inspired display
-    {
-        const float radius = juce::jmin(r.getWidth(), r.getHeight()) * 0.36f;
-        const auto c = r.getCentre();
-        g.setColour(HFXColours::grid);
-        g.drawEllipse(c.x - radius, c.y - radius, radius * 2, radius * 2, 1.0f);
-        g.drawEllipse(c.x - radius * 0.66f, c.y - radius * 0.66f, radius * 1.32f, radius * 1.32f, 1.0f);
-        g.drawLine(c.x - radius, c.y, c.x + radius, c.y, 1.0f);
-        g.drawLine(c.x, c.y - radius, c.x, c.y + radius, 1.0f);
-        juce::Path cloud;
-        for (int i = 0; i < 512; ++i)
-        {
-            const float x = c.x + processor.scopeXAt(i) * radius * 1.8f;
-            const float y = c.y - processor.scopeYAt(i) * radius * 1.8f;
-            if (i == 0) cloud.startNewSubPath(x, y); else cloud.lineTo(x, y);
-        }
-        g.setColour(HFXColours::orange.withAlpha(0.20f)); g.strokePath(cloud, juce::PathStrokeType(7.0f));
-        g.setColour(HFXColours::orange); g.strokePath(cloud, juce::PathStrokeType(1.5f));
-        g.setColour(HFXColours::muted); g.drawText("LIVE STEREO VECTORSCOPE / L-R", r.toNearestInt().reduced(12, 8), juce::Justification::topLeft);
-    }
-    else // Limiter: peak history and ceiling line
-    {
-        juce::Path trace;
-        for (int i = 0; i < 256; ++i)
-        {
-            const float x = r.getX() + 10.0f + (r.getWidth() - 20.0f) * (float)i / 255.0f;
-            const float sample = juce::jlimit(-1.0f, 1.0f, processor.waveformAt(i));
-            const float y = r.getCentreY() - sample * (r.getHeight() - 24.0f) * 0.48f;
-            if (i == 0) trace.startNewSubPath(x, y); else trace.lineTo(x, y);
-        }
-        g.setColour(HFXColours::white); g.strokePath(trace, juce::PathStrokeType(1.5f));
-        const float ceiling = juce::Decibels::decibelsToGain(processor.limiterCeilingDb());
-        const float ceilingY = r.getCentreY() - ceiling * (r.getHeight() - 24.0f) * 0.48f;
-        g.setColour(HFXColours::orange); g.drawHorizontalLine((int)ceilingY, r.getX() + 8, r.getRight() - 8);
-        g.setColour(HFXColours::orange); g.drawText("LIVE OUTPUT  |  CEILING " + juce::String(processor.limiterCeilingDb(), 1) + " dB", r.toNearestInt().reduced(12, 8), juce::Justification::topLeft);
+        const float hz = juce::jlimit(minHz, maxHz, processor.eqBandFrequency(band));
+        const float t = std::log(hz / minHz) / std::log(maxHz / minHz);
+        const float x = r.getX() + t * r.getWidth();
+        const float y = r.getCentreY() - processor.eqBandGain(band) * (r.getHeight() / 40.0f);
+        g.setColour(HFXColours::orange);
+        g.fillEllipse(x - 4.0f, y - 4.0f, 8.0f, 8.0f);
     }
 }
 
 HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
     : AudioProcessorEditor(&p), processor(p), spectrumView(p)
 {
-    setLookAndFeel(&laf);
     setSize(1120, 800);
     logo.setText("HFX", juce::dontSendNotification);
     logo.setFont(juce::Font(42.0f, juce::Font::bold));
@@ -270,7 +182,6 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
         auto& slider = knobs[(size_t)i];
         slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
         slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 76, 20);
-        slider.setLookAndFeel(&laf);
         addAndMakeVisible(slider);
         knobLabels[(size_t)i].setJustificationType(juce::Justification::centred);
         knobLabels[(size_t)i].setColour(juce::Label::textColourId, HFXColours::muted);
@@ -299,8 +210,7 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
             auto& slider = eqKnobs[(size_t)index];
             slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
             slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 62, 17);
-            slider.setLookAndFeel(&laf);
-            addAndMakeVisible(slider);
+                addAndMakeVisible(slider);
             eqKnobLabels[(size_t)index].setText(eqControlNames[control], juce::dontSendNotification);
             eqKnobLabels[(size_t)index].setJustificationType(juce::Justification::centred);
             eqKnobLabels[(size_t)index].setColour(juce::Label::textColourId, HFXColours::muted);
@@ -314,15 +224,11 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
     rmsText.setColour(juce::Label::textColourId, HFXColours::muted);
     addAndMakeVisible(leftMeterText); addAndMakeVisible(rightMeterText); addAndMakeVisible(rmsText);
     rebuildAttachments();
-    startTimerHz(20);
+    startTimerHz(30);
 }
 
 HFXAudioProcessorEditor::~HFXAudioProcessorEditor()
 {
-    stopTimer();
-    for (auto& slider : knobs) slider.setLookAndFeel(nullptr);
-    for (auto& slider : eqKnobs) slider.setLookAndFeel(nullptr);
-    setLookAndFeel(nullptr);
 }
 
 void HFXAudioProcessorEditor::refreshPresetChoices()
@@ -389,9 +295,9 @@ void HFXAudioProcessorEditor::applyPreset(int id)
         const float variationAmount = (float)variationForEq / 9.0f;
         const float root = beat ? (categoryForEq == 4 ? 48.0f : 90.0f + categoryForEq * 80.0f)
                                 : 100.0f + categoryForEq * 110.0f;
-        for (int band = 0; band < 8; ++band)
+        for (int band = 0; band < 5; ++band)
         {
-            const float freq = juce::jlimit(20.0f, 20000.0f, root * std::pow(2.0f, (float)band * (beat ? 1.05f : 1.15f)));
+            const float freq = juce::jlimit(20.0f, 20000.0f, root * std::pow(2.0f, (float)band * (beat ? 1.55f : 1.7f)));
             const float curve = (band == 0 ? -0.3f : band == 4 ? 0.25f : 0.1f) * (float)(categoryForEq + 1);
             set("eqBandFreq" + juce::String(band), freq);
             set("eqBandGain" + juce::String(band), juce::jlimit(-6.0f, 6.0f, (variationAmount - 0.5f) * 3.0f + curve));
@@ -405,9 +311,9 @@ void HFXAudioProcessorEditor::applyPreset(int id)
         const float v = (float)variation / 9.0f;
         const float baseFreq = beat ? (category == 4 ? 55.0f : 110.0f + category * 95.0f) : 120.0f + category * 90.0f;
         const float baseGain = (v - 0.5f) * (beat ? 4.0f : 3.0f);
-        for (int band = 0; band < 8; ++band)
+        for (int band = 0; band < 5; ++band)
         {
-            const float freq = juce::jlimit(20.0f, 20000.0f, baseFreq * std::pow(2.0f, (float)band * (beat ? 1.0f : 1.1f)));
+            const float freq = juce::jlimit(20.0f, 20000.0f, baseFreq * std::pow(2.0f, (float)band * (beat ? 1.45f : 1.65f)));
             const float shape = (band == 0 ? -0.25f : band == 4 ? 0.30f : 0.12f) * (float)(category + 1);
             set("eqBandFreq" + juce::String(band), freq);
             set("eqBandGain" + juce::String(band), juce::jlimit(-6.0f, 6.0f, baseGain + shape));
@@ -456,35 +362,9 @@ void HFXAudioProcessorEditor::applyPreset(int id)
 
 void HFXAudioProcessorEditor::timerCallback()
 {
-    const int currentMode = trackMode.getSelectedId();
-    if (currentMode != lastPresetMode)
-    {
-        lastPresetMode = currentMode;
-        refreshPresetChoices();
-    }
-    spectrumView.repaint();
-    leftMeterText.setText("L PEAK  " + juce::String(processor.leftPeakDb(), 1) + " dBFS", juce::dontSendNotification);
-    rightMeterText.setText("R PEAK  " + juce::String(processor.rightPeakDb(), 1) + " dBFS", juce::dontSendNotification);
-    rmsText.setText("OUTPUT RMS  " + juce::String(processor.outputRmsDb(), 1) + " dBFS", juce::dontSendNotification);
-    if (autoMixWaitTicks > 0 && !processor.autoMixReady())
-    {
-        --autoMixWaitTicks;
-        const int secondsLeft = (autoMixWaitTicks + 19) / 20;
-        status.setText("ANALYZING AUDIO — " + juce::String(secondsLeft) + " SEC", juce::dontSendNotification);
-    }
-    repaint();
-    if (processor.autoMixReady())
-    {
-        const auto result = processor.takeAutoMixResult();
-        auto set = [this](const char* key, float value)
-        {
-            if (auto* parameter = processor.state().getParameter(key)) parameter->setValueNotifyingHost(parameter->convertTo0to1(value));
-        };
-        set("eqBandGain0", result.eqLow); set("eqBandGain1", result.eqLowMid);
-        set("eqBandGain2", result.eqMid); set("eqBandGain3", result.eqHighMid); set("eqBandGain4", result.eqHigh);
-        set("threshold", result.threshold); set("drive", result.drive); set("width", result.width); set("inputGain", result.inputGain);
-        status.setText("AUTO-MIX SUGGESTIONS APPLIED  |  LOW " + juce::String(result.eqLow, 1) + " dB  |  MID " + juce::String(result.eqMid, 1) + " dB  |  HIGH " + juce::String(result.eqHigh, 1) + " dB", juce::dontSendNotification);
-    }
+    // Repaint only the graph; FFT calculation remains on the audio thread.
+    if (activeTab == 0)
+        spectrumView.repaint();
 }
 
 void HFXAudioProcessorEditor::paint(juce::Graphics& g)

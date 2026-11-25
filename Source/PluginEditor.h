@@ -15,6 +15,7 @@ private:
     HFXAudioProcessor& processor;
     int displayMode = 0;
     int draggedBand = -1;
+    std::array<float, 128> spectrumSmooth {};
     void updateEqFromPoint(juce::Point<float> point);
 };
 

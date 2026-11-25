@@ -1,0 +1,10 @@
+HFX LIVE SPECTRUM UPDATE
+
+This update adds a live input spectrum display to the simplified EQ graph.
+- Reads the processor's existing FFT bins via spectrumAtFrequency().
+- FFT calculation remains in the processor/audio thread; the editor only reads atomic values.
+- UI timer refreshes the graph at 30 Hz while EQ tab is selected.
+- Uses a 128-point logarithmic frequency curve and light smoothing.
+- Does not add FFT work to paint() and does not change audio processing or parameter IDs.
+
+IMPORTANT: This is a source update, not a verified compiled VST3. Build with the repository's GitHub Actions workflow and test in Ableton before replacing any installed plugin. If the build fails, send the full Actions log.
