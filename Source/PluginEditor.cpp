@@ -58,7 +58,8 @@ void HFXSpectrumView::updateEqFromPoint(juce::Point<float> point)
     const auto r = getLocalBounds().toFloat();
     const float t = juce::jlimit(0.0f, 1.0f, (point.x - r.getX()) / juce::jmax(1.0f, r.getWidth()));
     const float hz = 20.0f * std::pow(20000.0f / 20.0f, t);
-    const float gain = juce::jlimit(-18.0f, 18.0f, (r.getCentreY() - point.y) * 40.0f / r.getHeight());
+    const float safeHeight = juce::jmax(1.0f, r.getHeight());
+    const float gain = juce::jlimit(-18.0f, 18.0f, (r.getCentreY() - point.y) * 40.0f / safeHeight);
     processor.setEqBandFromGraph(draggedBand, hz, gain);
     repaint();
 }
@@ -388,9 +389,9 @@ void HFXAudioProcessorEditor::applyPreset(int id)
         const float variationAmount = (float)variationForEq / 9.0f;
         const float root = beat ? (categoryForEq == 4 ? 48.0f : 90.0f + categoryForEq * 80.0f)
                                 : 100.0f + categoryForEq * 110.0f;
-        for (int band = 0; band < 5; ++band)
+        for (int band = 0; band < 8; ++band)
         {
-            const float freq = juce::jlimit(20.0f, 20000.0f, root * std::pow(2.0f, (float)band * (beat ? 1.55f : 1.7f)));
+            const float freq = juce::jlimit(20.0f, 20000.0f, root * std::pow(2.0f, (float)band * (beat ? 1.05f : 1.15f)));
             const float curve = (band == 0 ? -0.3f : band == 4 ? 0.25f : 0.1f) * (float)(categoryForEq + 1);
             set("eqBandFreq" + juce::String(band), freq);
             set("eqBandGain" + juce::String(band), juce::jlimit(-6.0f, 6.0f, (variationAmount - 0.5f) * 3.0f + curve));
@@ -404,9 +405,9 @@ void HFXAudioProcessorEditor::applyPreset(int id)
         const float v = (float)variation / 9.0f;
         const float baseFreq = beat ? (category == 4 ? 55.0f : 110.0f + category * 95.0f) : 120.0f + category * 90.0f;
         const float baseGain = (v - 0.5f) * (beat ? 4.0f : 3.0f);
-        for (int band = 0; band < 5; ++band)
+        for (int band = 0; band < 8; ++band)
         {
-            const float freq = juce::jlimit(20.0f, 20000.0f, baseFreq * std::pow(2.0f, (float)band * (beat ? 1.45f : 1.65f)));
+            const float freq = juce::jlimit(20.0f, 20000.0f, baseFreq * std::pow(2.0f, (float)band * (beat ? 1.0f : 1.1f)));
             const float shape = (band == 0 ? -0.25f : band == 4 ? 0.30f : 0.12f) * (float)(category + 1);
             set("eqBandFreq" + juce::String(band), freq);
             set("eqBandGain" + juce::String(band), juce::jlimit(-6.0f, 6.0f, baseGain + shape));

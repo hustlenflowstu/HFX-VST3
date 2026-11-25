@@ -118,6 +118,17 @@ HFXAudioProcessor::HFXAudioProcessor()
     pTrackMode = apvts.getRawParameterValue("trackMode");
     pStemRole = apvts.getRawParameterValue("stemRole");
     pBypass = apvts.getRawParameterValue("bypass");
+
+    // Fail construction loudly in debug builds if the parameter layout and cached
+    // real-time pointers ever drift apart. Release builds retain safe runtime guards.
+    jassert(pBypass != nullptr);
+    jassert(pInputGain != nullptr && pDrive != nullptr && pSatMix != nullptr);
+    jassert(pTone != nullptr && pWidth != nullptr && pLeftPan != nullptr && pRightPan != nullptr);
+    jassert(pAttack != nullptr && pRelease != nullptr && pThreshold != nullptr && pRatio != nullptr);
+    jassert(pCeiling != nullptr && pLimitRelease != nullptr);
+    for (int band = 0; band < 8; ++band)
+        jassert(pEqBandFreq[(size_t)band] != nullptr && pEqBandGain[(size_t)band] != nullptr
+                && pEqBandType[(size_t)band] != nullptr && pEqBandQ[(size_t)band] != nullptr);
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout HFXAudioProcessor::makeParameters()
@@ -284,7 +295,8 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
             scopeYHistory[(size_t)slot].store(0.5f * (l + r), std::memory_order_relaxed);
         }
     };
-    if (pBypass->load() > 0.5f)
+    // A missing bypass parameter must never cause an access violation in the audio callback.
+    if (pBypass == nullptr || pBypass->load(std::memory_order_relaxed) > 0.5f)
     {
         captureStereoScope();
         return;
