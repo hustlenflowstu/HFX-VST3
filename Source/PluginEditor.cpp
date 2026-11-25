@@ -113,7 +113,7 @@ void HFXSpectrumView::paint(juce::Graphics& g)
             const auto scope = plot.withSizeKeepingCentre(juce::jmin(plot.getWidth(), plot.getHeight()),
                                                            juce::jmin(plot.getWidth(), plot.getHeight()));
             g.setColour(HFXColours::grid);
-            g.drawEllipse(scope);
+            g.drawEllipse(scope, 1.0f);
             g.drawLine(scope.getCentreX(), scope.getY(), scope.getCentreX(), scope.getBottom(), 1.0f);
             g.drawLine(scope.getX(), scope.getCentreY(), scope.getRight(), scope.getCentreY(), 1.0f);
             g.drawLine(scope.getX() + scope.getWidth() * 0.15f, scope.getBottom() - scope.getHeight() * 0.15f,
