@@ -500,7 +500,7 @@ void HFXAudioProcessorEditor::applyPreset(int id)
          -24.0f, 2.5f, 22.0f, 125.0f, 0.5f, 0.05f, 0.10f, 1.00f, -1.5f, -1.2f, 100.0f, 0.02f}
     };
 
-    static const Profile beatProfiles[5] =
+    static const Profile beatProfiles[7] =
     {
         // Kick: sub foundation, controlled click and transient.
         {{45, 90, 250, 2500, 9000}, {1.0f, -0.8f, -1.5f, 0.7f, -0.5f}, {0.75f, 0.90f, 1.00f, 0.85f, 0.70f},
