@@ -178,8 +178,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout HFXAudioProcessor::makeParam
     f("satMix", "Saturation Mix", { 0.0f, 1.0f, 0.01f }, 0.35f);
     f("width", "Width", { 0.0f, 2.0f, 0.01f }, 1.0f);
     f("pan", "Pan", { -1.0f, 1.0f, 0.01f }, 0.0f);
-    f("leftPan", "Left Channel Pan", { -1.0f, 1.0f, 0.01f }, -1.0f);
-    f("rightPan", "Right Channel Pan", { -1.0f, 1.0f, 0.01f }, 1.0f);
+    f("leftPan", "Left Channel Pan", { -1.0f, 0.0f, 0.01f }, 0.0f);
+    f("rightPan", "Right Channel Pan", { 0.0f, 1.0f, 0.01f }, 0.0f);
     f("monoFreq", "Mono Maker", { 20.0f, 300.0f, 1.0f }, 120.0f, "Hz");
     f("haasMs", "Haas Delay", { 0.0f, 30.0f, 0.1f }, 0.0f, "ms");
     f("transient", "Transient", { 0.0f, 1.0f, 0.01f }, 0.0f);
@@ -350,10 +350,12 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
     const float transientCoeff = std::exp(-1.0f / (0.002f * (float)sampleRateHz));
     const float toneCoeff = std::exp(-1.0f / (0.001f * 2.0f * (float)sampleRateHz));
     const float width = pWidth->load(std::memory_order_relaxed);
-    const float panL = pLeftPan != nullptr ? juce::jlimit(-1.0f, 1.0f, pLeftPan->load(std::memory_order_relaxed)) : -1.0f;
-    const float panR = pRightPan != nullptr ? juce::jlimit(-1.0f, 1.0f, pRightPan->load(std::memory_order_relaxed)) : 1.0f;
-    const float panLeft = std::cos((panL + 1.0f) * 0.25f * juce::MathConstants<float>::pi);
-    const float panRight = std::cos((1.0f - panR) * 0.25f * juce::MathConstants<float>::pi);
+    // One-direction controls combine into a constant-power stereo balance.
+    const float panL = pLeftPan != nullptr ? juce::jlimit(-1.0f, 0.0f, pLeftPan->load(std::memory_order_relaxed)) : 0.0f;
+    const float panR = pRightPan != nullptr ? juce::jlimit(0.0f, 1.0f, pRightPan->load(std::memory_order_relaxed)) : 0.0f;
+    const float balance = juce::jlimit(-1.0f, 1.0f, panL + panR);
+    const float panLeft = std::sqrt(2.0f) * std::cos((balance + 1.0f) * 0.25f * juce::MathConstants<float>::pi);
+    const float panRight = std::sqrt(2.0f) * std::sin((balance + 1.0f) * 0.25f * juce::MathConstants<float>::pi);
 
     float maxCompReduction = 0.0f;
     float maxLimitReduction = 0.0f;

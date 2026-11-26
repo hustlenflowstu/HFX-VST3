@@ -218,30 +218,70 @@ void HFXSpectrumView::paint(juce::Graphics& g)
         g.drawText("R", (int)(cx + radius - 2.0f), (int)(baseY - 3.0f), 18, 16,
                    juce::Justification::centredRight);
 
-        // Plot actual recent samples. M/S is converted to polar coordinates:
-        // angle = atan2(Side, abs(Mid)); radius = sqrt(Mid^2 + Side^2).
-        // This yields a stable L-to-R stereo placement fan, not an animated graphic.
-        juce::Path trace;
-        bool started = false;
+        // Live polar stereo-level trace from the recent processed L/R output samples.
+        // Left-only energy plots at the left edge, right-only at the right edge,
+        // and centred/equal energy plots at the top of the fan.
+        std::array<float, 181> polarPeak {};
+        std::array<float, 181> polarEnergy {};
+        float blockPeak = 1.0e-5f;
         for (int i = 0; i < 512; ++i)
         {
-            const float side = processor.scopeXAt(i);
             const float mid = processor.scopeYAt(i);
-            const float magnitude = juce::jlimit(0.0f, 1.0f,
-                std::sqrt(mid * mid + side * side));
-            const float angle = std::atan2(side, juce::jmax(0.00001f, std::abs(mid)));
-            const float x = cx + std::sin(angle) * magnitude * radius;
-            const float y = baseY - std::cos(angle) * magnitude * radius;
-            if (!started) { trace.startNewSubPath(x, y); started = true; }
-            else trace.lineTo(x, y);
+            const float side = processor.scopeXAt(i);
+            const float lSample = mid + side;
+            const float rSample = mid - side;
+            blockPeak = juce::jmax(blockPeak, juce::jmax(std::abs(lSample), std::abs(rSample)));
         }
-
-        g.setColour(HFXColours::orange.withAlpha(0.20f));
-        g.strokePath(trace, juce::PathStrokeType(7.0f, juce::PathStrokeType::curved,
-                                                 juce::PathStrokeType::rounded));
-        g.setColour(HFXColours::orange);
-        g.strokePath(trace, juce::PathStrokeType(1.8f, juce::PathStrokeType::curved,
-                                                 juce::PathStrokeType::rounded));
+        const float displayScale = juce::jlimit(1.0f, 8.0f, 0.85f / blockPeak);
+        for (int i = 0; i < 512; ++i)
+        {
+            const float mid = processor.scopeYAt(i);
+            const float side = processor.scopeXAt(i);
+            const float l = std::abs(mid + side);
+            const float rr = std::abs(mid - side);
+            const float total = std::sqrt(l * l + rr * rr);
+            if (total < 1.0e-5f) continue;
+            const float panPosition = rr / juce::jmax(1.0e-6f, l + rr);
+            const int bin = juce::jlimit(0, 180, (int)std::round(panPosition * 180.0f));
+            const float level = juce::jlimit(0.0f, 1.0f, total * displayScale);
+            polarPeak[(size_t)bin] = juce::jmax(polarPeak[(size_t)bin], level);
+            polarEnergy[(size_t)bin] += level * level;
+        }
+        juce::Path polarTrace, polarFill;
+        bool traceStarted = false;
+        for (int bin = 0; bin <= 180; ++bin)
+        {
+            const float rms = std::sqrt(polarEnergy[(size_t)bin] / 3.0f);
+            const float level = juce::jmax(polarPeak[(size_t)bin] * 0.72f, rms);
+            const float angle = juce::MathConstants<float>::pi * (1.0f - (float)bin / 180.0f);
+            const float x = cx + std::cos(angle) * level * radius;
+            const float y = baseY - std::sin(angle) * level * radius;
+            if (!traceStarted)
+            {
+                polarTrace.startNewSubPath(x, y);
+                polarFill.startNewSubPath(cx, baseY);
+                polarFill.lineTo(x, y);
+                traceStarted = true;
+            }
+            else
+            {
+                polarTrace.lineTo(x, y);
+                polarFill.lineTo(x, y);
+            }
+        }
+        if (traceStarted)
+        {
+            polarFill.lineTo(cx, baseY);
+            polarFill.closeSubPath();
+            g.setColour(HFXColours::orange.withAlpha(0.13f));
+            g.fillPath(polarFill);
+            g.setColour(HFXColours::orange.withAlpha(0.28f));
+            g.strokePath(polarTrace, juce::PathStrokeType(5.0f, juce::PathStrokeType::curved,
+                                                          juce::PathStrokeType::rounded));
+            g.setColour(HFXColours::orange);
+            g.strokePath(polarTrace, juce::PathStrokeType(1.6f, juce::PathStrokeType::curved,
+                                                          juce::PathStrokeType::rounded));
+        }
 
         const float corr = processor.stereoCorrelation();
         g.setColour(HFXColours::muted);
@@ -356,7 +396,7 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
     rmsText.setColour(juce::Label::textColourId, HFXColours::muted);
     addAndMakeVisible(leftMeterText); addAndMakeVisible(rightMeterText); addAndMakeVisible(rmsText);
     rebuildAttachments();
-    startTimerHz(20);
+    startTimerHz(30);
 }
 
 HFXAudioProcessorEditor::~HFXAudioProcessorEditor()
@@ -415,6 +455,11 @@ void HFXAudioProcessorEditor::rebuildAttachments()
                                        juce::dontSendNotification);
         attachments[(size_t)i] = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
             processor.state(), parameterId, knobs[(size_t)i]);
+        if (activeTab == 3)
+        {
+            knobs[(size_t)i].textFromValueFunction = [](double value) { return juce::String((int)std::round(value * 100.0)) + "%"; };
+            knobs[(size_t)i].valueFromTextFunction = [](const juce::String& text) { return text.getDoubleValue() / 100.0; };
+        }
     }
 }
 
