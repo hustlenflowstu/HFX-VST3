@@ -207,7 +207,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout HFXAudioProcessor::makeParam
     params.push_back(std::make_unique<AudioParameterChoice>(
         ParameterID { "stemRole", 1 }, "Beat Stem Role",
         StringArray { "Kick", "Snare", "Percussion", "Closed Hat", "Open Hat",
-                      "EFX", "808 / Bass", "Drum Filler", "Other" }, 0));
+                      "EFX", "808 / Bass", "Melody" }, 0));
     params.push_back(std::make_unique<AudioParameterBool>(
         ParameterID { "bypass", 1 }, "Bypass", false));
     return { params.begin(), params.end() };

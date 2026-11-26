@@ -6,12 +6,11 @@ namespace
     const juce::StringArray vocalPresets = []
     {
         juce::StringArray a;
-        const char* groups[5][10] = {
-            {"Rap - Clean Punch", "Rap - Forward Lead", "Rap - Aggressive Bite", "Rap - Dry Close Mic", "Rap - Dark Chest", "Rap - Bright Cut", "Rap - Thick Doubled", "Rap - Tight Modern", "Rap - Grit Texture", "Rap - Radio Lead"},
-            {"Melody - Smooth Tune", "Melody - Hard Tune", "Melody - Airy Tune", "Melody - Emotional Lead", "Melody - Wide Hook", "Melody - Bright Top", "Melody - Soft Tune", "Melody - Dark Tune", "Melody - Layer Stack", "Melody - Modern Pop Rap"},
-            {"R&B - Silky Lead", "R&B - Warm Intimate", "R&B - Breath Control", "R&B - Velvet Smooth", "R&B - Wide Harmony", "R&B - Soft Air", "R&B - Rich Chest", "R&B - Late Night", "R&B - Clean Studio", "R&B - Gloss Lead"},
-            {"Pop - Radio Bright", "Pop - Clean Center", "Pop - Airy Lead", "Pop - Punchy Lead", "Pop - Soft Focus", "Pop - Wide Chorus", "Pop - Intimate Verse", "Pop - Gloss Vocal", "Pop - Modern Stack", "Pop - Anthem Lead"},
-            {"FX - Telephone", "FX - Megaphone", "FX - Lo-Fi Vocal", "FX - Radio Distort", "FX - Whisper Air", "FX - Formant Color", "FX - Wide Doubler", "FX - Throw Delay", "FX - Dark Reverb", "FX - Creative Crush"}
+        const char* groups[4][10] = {
+            {"Rap - Clean Punch", "Rap - Forward Lead", "Rap - Tight Modern", "Rap - Clear Articulation", "Rap - Low-Mid Control", "Rap - Bright Presence", "Rap - Smooth Top", "Rap - Dense Lead", "Rap - Natural Dynamic", "Rap - Studio Lead"},
+            {"Melodic - Clean Lead", "Melodic - Smooth Tune", "Melodic - Bright Tune", "Melodic - Soft Presence", "Melodic - Tight Dynamics", "Melodic - Air Control", "Melodic - Warm Lead", "Melodic - Clear Hook", "Melodic - Balanced Lead", "Melodic - Modern Lead"},
+            {"R&B - Silky Clean", "R&B - Warm Intimate", "R&B - Smooth Presence", "R&B - Breath Detail", "R&B - Rich Chest", "R&B - Soft Air", "R&B - Controlled Peaks", "R&B - Clean Studio", "R&B - Balanced Lead", "R&B - Polished Lead"},
+            {"Pop - Radio Clean", "Pop - Clear Center", "Pop - Bright Presence", "Pop - Smooth Top", "Pop - Tight Lead", "Pop - Natural Body", "Pop - Clean Air", "Pop - Balanced Lead", "Pop - Dense Lead", "Pop - Modern Studio"}
         };
         for (const auto& group : groups) for (auto* name : group) a.add(name);
         return a;
@@ -19,12 +18,14 @@ namespace
     const juce::StringArray beatPresets = []
     {
         juce::StringArray a;
-        const char* groups[5][10] = {
-            {"Kick - Deep Trap", "Kick - Punch Attack", "Kick - Tight Short", "Kick - Warm Round", "Kick - Hard Clip", "Kick - Sub Focus", "Kick - Modern Knock", "Kick - Dry Studio", "Kick - Heavy Impact", "Kick - Soft Vintage"},
-            {"Snare - Crack", "Snare - Tight Pop", "Snare - Wide Layer", "Snare - Dark Punch", "Snare - Bright Snap", "Snare - Room Body", "Snare - Trap Rim", "Snare - Dry Knock", "Snare - Big Plate", "Snare - Lo-Fi"},
-            {"Perc - Clean Groove", "Perc - Bright Tick", "Perc - Warm Hand", "Perc - Wide Perc", "Perc - Tight Transient", "Perc - Organic", "Perc - Afro Groove", "Perc - Dark Texture", "Perc - Punch Layer", "Perc - Soft Space"},
-            {"Hi-Hat - Crisp Trap", "Hi-Hat - Smooth Top", "Hi-Hat - Tight Dry", "Hi-Hat - Bright Roll", "Hi-Hat - Dark Control", "Hi-Hat - Open Air", "Hi-Hat - Wide Pattern", "Hi-Hat - Soft Tick", "Hi-Hat - Modern Drill", "Hi-Hat - Lo-Fi Dust"},
-            {"808 - Clean Sub", "808 - Hard Clip", "808 - Long Glide", "808 - Tight Mono", "808 - Deep Round", "808 - Grit Distort", "808 - Punch Bass", "808 - Dark Heavy", "808 - Smooth Sustain", "808 - Drill Growl"}
+        const char* groups[7][10] = {
+            {"Kick - Deep Trap", "Kick - Punch Attack", "Kick - Tight Short", "Kick - Warm Round", "Kick - Sub Focus", "Kick - Modern Knock", "Kick - Dry Studio", "Kick - Heavy Impact", "Kick - Clean Transient", "Kick - Balanced"},
+            {"Snare - Clean Crack", "Snare - Tight Pop", "Snare - Body Punch", "Snare - Dark Punch", "Snare - Bright Snap", "Snare - Trap Rim", "Snare - Dry Knock", "Snare - Modern Snap", "Snare - Clean Studio", "Snare - Balanced"},
+            {"Perc - Clean Groove", "Perc - Bright Tick", "Perc - Warm Hand", "Perc - Tight Transient", "Perc - Organic", "Perc - Afro Groove", "Perc - Dark Texture", "Perc - Punch Layer", "Perc - Clean Detail", "Perc - Balanced"},
+            {"Hi-Hat - Crisp Trap", "Hi-Hat - Smooth Top", "Hi-Hat - Tight Dry", "Hi-Hat - Bright Roll", "Hi-Hat - Dark Control", "Hi-Hat - Open Air", "Hi-Hat - Soft Tick", "Hi-Hat - Modern Drill", "Hi-Hat - Clean Detail", "Hi-Hat - Balanced"},
+            {"808 - Clean Sub", "808 - Tight Mono", "808 - Deep Round", "808 - Controlled Harmonics", "808 - Punch Bass", "808 - Dark Heavy", "808 - Smooth Sustain", "808 - Clean Drill", "808 - Balanced Low End", "808 - Studio Sub"},
+            {"EFX - Riser Clean", "EFX - Riser Bright", "EFX - Uplifter Tight", "EFX - Downlifter", "EFX - Impact Punch", "EFX - Sweep Wide", "EFX - Transition Clean", "EFX - Reverse FX", "EFX - Noise Sweep", "EFX - Filler Control"},
+            {"Melody - Clean Keys", "Melody - Piano Clear", "Melody - Synth Smooth", "Melody - Pluck Detail", "Melody - Pad Control", "Melody - Bell Bright", "Melody - Guitar Clean", "Melody - Wide Synth", "Melody - Warm Keys", "Melody - Balanced Music"}
         };
         for (const auto& group : groups) for (auto* name : group) a.add(name);
         return a;
@@ -294,10 +295,10 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
     stemRole.addItem("OPEN HAT", 5);
     stemRole.addItem("EFX", 6);
     stemRole.addItem("808 / BASS", 7);
-    stemRole.addItem("DRUM FILLER", 8);
-    stemRole.addItem("OTHER", 9);
+    stemRole.addItem("MELODY", 8);
     addAndMakeVisible(stemRole);
     stemRoleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(processor.state(), "stemRole", stemRole);
+    stemRole.onChange = [this] { refreshPresetChoices(); };
     stemRole.setVisible(trackMode.getSelectedId() == 2);
     trackMode.onChange = [this]
     {
@@ -390,8 +391,19 @@ void HFXAudioProcessorEditor::refreshPresetChoices()
     presetBox.onChange = nullptr;
     presetBox.clear(juce::dontSendNotification);
     const auto& choices = beat ? beatPresets : vocalPresets;
-    for (int i = 0; i < choices.size(); ++i) presetBox.addItem(choices[i], i + 1);
-    presetBox.setText(beat ? "BEAT PRESETS" : "VOCAL PRESETS", juce::dontSendNotification);
+    if (beat)
+    {
+        const int category = juce::jlimit(0, 6, stemRole.getSelectedId() - 1);
+        const int first = category * 10;
+        for (int i = 0; i < 10; ++i)
+            presetBox.addItem(choices[first + i], first + i + 1);
+        presetBox.setText(stemRole.getText() + " MIX PRESETS", juce::dontSendNotification);
+    }
+    else
+    {
+        for (int i = 0; i < choices.size(); ++i) presetBox.addItem(choices[i], i + 1);
+        presetBox.setText("VOCAL MIX PRESETS", juce::dontSendNotification);
+    }
     presetBox.onChange = [this] { if (presetBox.getSelectedId() > 0) applyPreset(presetBox.getSelectedId()); };
 }
 
@@ -463,7 +475,7 @@ void HFXAudioProcessorEditor::applyPreset(int id)
     };
 
     const bool beat = trackMode.getSelectedId() == 2;
-    const int safeId = juce::jlimit(1, 50, id);
+    const int safeId = juce::jlimit(1, beat ? 70 : 40, id);
     const int category = (safeId - 1) / 10;
     const int variation = (safeId - 1) % 10;
 
@@ -483,9 +495,9 @@ void HFXAudioProcessorEditor::applyPreset(int id)
         // Pop: clean presence and controlled top end.
         {{100, 300, 1600, 4500, 13500}, {-1.2f, -1.0f, 0.2f, 1.0f, 0.8f}, {0.80f, 0.95f, 0.90f, 0.80f, 0.70f},
          -23.0f, 2.8f, 16.0f, 115.0f, 0.9f, 0.08f, 0.13f, 1.04f, -1.0f, -1.2f, 90.0f, 0.03f},
-        // Creative vocal tone: deliberately stronger color; no delay/reverb is implied.
-        {{180, 500, 1500, 3500, 9000}, {-3.0f, -1.5f, 0.8f, 1.0f, -1.0f}, {1.10f, 1.00f, 0.90f, 0.90f, 0.80f},
-         -20.0f, 4.0f, 7.0f, 75.0f, 4.0f, -0.15f, 0.32f, 1.02f, -2.0f, -1.5f, 70.0f, 0.08f}
+        // Clean vocal: neutral, controlled dynamics and restrained processing.
+        {{90, 260, 1200, 4200, 13500}, {-0.8f, -1.0f, 0.1f, 0.7f, 0.5f}, {0.75f, 0.90f, 0.85f, 0.80f, 0.70f},
+         -24.0f, 2.5f, 22.0f, 125.0f, 0.5f, 0.05f, 0.10f, 1.00f, -1.5f, -1.2f, 100.0f, 0.02f}
     };
 
     static const Profile beatProfiles[5] =
@@ -504,7 +516,13 @@ void HFXAudioProcessorEditor::applyPreset(int id)
          -24.0f, 2.0f, 2.0f, 65.0f, 0.5f, -0.08f, 0.08f, 1.10f, -1.0f, -1.0f, 65.0f, 0.05f},
         // 808: mono-safe low end and restrained drive.
         {{35, 65, 140, 700, 4500}, {0.8f, 0.3f, -1.0f, 0.5f, -0.5f}, {0.70f, 0.85f, 0.95f, 0.90f, 0.75f},
-         -18.0f, 2.6f, 35.0f, 145.0f, 2.0f, -0.12f, 0.20f, 0.92f, -1.0f, -1.0f, 110.0f, 0.04f}
+         -18.0f, 2.6f, 35.0f, 145.0f, 2.0f, -0.12f, 0.20f, 0.92f, -1.0f, -1.0f, 110.0f, 0.04f},
+        // EFX: conservative tonal and peak control for risers, sweeps and impacts.
+        {{120, 350, 1200, 5000, 12000}, {-1.0f, -0.5f, 0.0f, 0.5f, -0.5f}, {0.80f, 0.90f, 0.90f, 0.85f, 0.75f},
+         -20.0f, 2.0f, 8.0f, 100.0f, 0.6f, 0.0f, 0.08f, 1.10f, -2.0f, -1.5f, 100.0f, 0.08f},
+        // Melody: balanced harmonic content, gentle dynamics and modest width.
+        {{100, 280, 1400, 4800, 14000}, {-0.8f, -0.8f, 0.0f, 0.6f, 0.4f}, {0.75f, 0.90f, 0.85f, 0.80f, 0.70f},
+         -22.0f, 2.2f, 25.0f, 140.0f, 0.5f, 0.08f, 0.10f, 1.08f, -1.5f, -1.3f, 110.0f, 0.02f}
     };
 
     const auto& p = beat ? beatProfiles[category] : vocal[category];
@@ -518,7 +536,7 @@ void HFXAudioProcessorEditor::applyPreset(int id)
 
     // Each named preset is a variation of its instrument/voice-family base profile.
     // Variation is deliberately restrained to avoid extreme, source-dependent settings.
-    const float eqVariation = (v - 0.5f) * (beat ? 1.0f : 0.8f);
+    const float eqVariation = (v - 0.5f) * (beat ? 0.65f : 0.55f);
     for (int band = 0; band < 5; ++band)
     {
         const float freqScale = 1.0f + (v - 0.5f) * (band == 0 ? -0.08f : band == 4 ? 0.10f : 0.04f);
@@ -533,12 +551,12 @@ void HFXAudioProcessorEditor::applyPreset(int id)
     set("ratio", juce::jlimit(1.0f, 8.0f, p.ratio + (v - 0.5f) * 0.5f));
     set("attack", p.attack * (0.90f + 0.20f * v));
     set("release", p.release * (0.90f + 0.20f * v));
-    set("drive", juce::jlimit(0.0f, 8.0f, p.drive * (0.85f + 0.30f * v)));
+    set("drive", juce::jlimit(0.0f, 4.0f, p.drive * (0.85f + 0.30f * v)));
     set("tone", juce::jlimit(-1.0f, 1.0f, p.tone + (v - 0.5f) * 0.12f));
-    set("satMix", juce::jlimit(0.0f, 0.5f, p.satMix * (0.85f + 0.30f * v)));
+    set("satMix", juce::jlimit(0.0f, 0.30f, p.satMix * (0.85f + 0.30f * v)));
     set("width", juce::jlimit(0.0f, 1.35f, p.width + (v - 0.5f) * 0.08f));
-    set("inputGain", p.input + (0.5f - v) * 0.5f);
-    set("ceiling", p.ceiling);
+    set("inputGain", juce::jlimit(-3.0f, 0.0f, p.input + (0.5f - v) * 0.25f));
+    set("ceiling", juce::jlimit(-2.0f, -1.0f, p.ceiling));
     set("limitRelease", p.limiterRelease);
     set("transient", p.transient);
 
@@ -551,7 +569,7 @@ void HFXAudioProcessorEditor::applyPreset(int id)
 
     const auto& names = beat ? beatPresets : vocalPresets;
     const auto presetName = names[safeId - 1];
-    status.setText(presetName + " LOADED — STARTING PROFILE; ADJUST FOR SOURCE",
+    status.setText(presetName + " LOADED — CLEAN STARTING MIX; CHECK LEVELS",
                    juce::dontSendNotification);
 }
 
