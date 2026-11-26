@@ -180,52 +180,74 @@ void HFXSpectrumView::paint(juce::Graphics& g)
         g.setColour(HFXColours::orange); g.strokePath(curve, juce::PathStrokeType(2.5f));
         g.setColour(HFXColours::muted); g.drawText("SOFT CLIP / HARMONIC TRANSFER", r.toNearestInt().reduced(12, 8), juce::Justification::topLeft);
     }
-    else if (displayMode == 3) // Stereo field / vectorscope-inspired display
+    else if (displayMode == 3) // Polar stereo placement display
     {
-        const float radius = juce::jmin(r.getWidth(), r.getHeight()) * 0.36f;
-        const auto c = r.getCentre();
+        // Polar display: left/right occupy the lower arc; centre/mono is at the top.
+        // The radius is derived from the measured Mid/Side sample magnitude.
+        const float radius = juce::jmin(r.getWidth() * 0.43f, r.getHeight() * 0.78f);
+        const float cx = r.getCentreX();
+        const float baseY = r.getBottom() - 18.0f;
+        const float pi = juce::MathConstants<float>::pi;
+
+        g.setColour(HFXColours::muted);
+        g.drawText("POLAR LEVEL", r.toNearestInt().withHeight(18).reduced(8, 0),
+                   juce::Justification::centredTop);
+
+        // Semi-circular polar grid.
         g.setColour(HFXColours::grid);
-        g.drawEllipse(c.x - radius, c.y - radius, radius * 2, radius * 2, 1.0f);
-        g.drawEllipse(c.x - radius * 0.66f, c.y - radius * 0.66f, radius * 1.32f, radius * 1.32f, 1.0f);
-        g.drawLine(c.x - radius, c.y, c.x + radius, c.y, 1.0f);
-        g.drawLine(c.x, c.y - radius, c.x, c.y + radius, 1.0f);
-        // Standard normalized mid/side vectorscope:
-        // X = (L - R) / sqrt(2), Y = (L + R) / sqrt(2).
-        // This removes the previous arbitrary 1.8x visual magnification.
-        g.setColour(HFXColours::grid.withAlpha(0.8f));
-        g.drawLine(c.x - radius, c.y - radius, c.x + radius, c.y + radius, 0.8f);
-        g.drawLine(c.x - radius, c.y + radius, c.x + radius, c.y - radius, 0.8f);
-        const float norm = 0.70710678f;
+        for (float fraction : { 0.25f, 0.50f, 0.75f, 1.0f })
+        {
+            const float rr = radius * fraction;
+            juce::Path arc;
+            arc.addCentredArc(cx, baseY, rr, rr, 0.0f, pi, 2.0f * pi, true);
+            g.strokePath(arc, juce::PathStrokeType(1.0f));
+        }
+
+        // Radial guides from the centre/top toward the left and right edges.
+        for (int degrees : { 0, 30, 60, 90, 120, 150, 180 })
+        {
+            const float a = juce::degreesToRadians((float)degrees);
+            const float x = cx + std::cos(a) * radius;
+            const float y = baseY - std::sin(a) * radius;
+            g.drawLine(cx, baseY, x, y, 0.8f);
+        }
+
+        g.setColour(HFXColours::muted);
+        g.drawText("L", (int)(cx - radius - 16.0f), (int)(baseY - 3.0f), 18, 16,
+                   juce::Justification::centredLeft);
+        g.drawText("R", (int)(cx + radius - 2.0f), (int)(baseY - 3.0f), 18, 16,
+                   juce::Justification::centredRight);
+
+        // Plot actual recent samples. M/S is converted to polar coordinates:
+        // angle = atan2(Side, abs(Mid)); radius = sqrt(Mid^2 + Side^2).
+        // This yields a stable L-to-R stereo placement fan, not an animated graphic.
+        juce::Path trace;
+        bool started = false;
         for (int i = 0; i < 512; ++i)
         {
             const float side = processor.scopeXAt(i);
             const float mid = processor.scopeYAt(i);
-            const float xNorm = juce::jlimit(-1.0f, 1.0f, side * 1.41421356f);
-            const float yNorm = juce::jlimit(-1.0f, 1.0f, mid * 1.41421356f);
-            const float x = c.x + xNorm * radius;
-            const float y = c.y - yNorm * radius;
-            g.setColour(HFXColours::orange.withAlpha(0.34f));
-            g.fillEllipse(x - 1.5f, y - 1.5f, 3.0f, 3.0f);
+            const float magnitude = juce::jlimit(0.0f, 1.0f,
+                std::sqrt(mid * mid + side * side));
+            const float angle = std::atan2(side, juce::jmax(0.00001f, std::abs(mid)));
+            const float x = cx + std::sin(angle) * magnitude * radius;
+            const float y = baseY - std::cos(angle) * magnitude * radius;
+            if (!started) { trace.startNewSubPath(x, y); started = true; }
+            else trace.lineTo(x, y);
         }
-        // Correlation meter: -1 = out of phase, 0 = uncorrelated, +1 = mono-compatible.
+
+        g.setColour(HFXColours::orange.withAlpha(0.20f));
+        g.strokePath(trace, juce::PathStrokeType(7.0f, juce::PathStrokeType::curved,
+                                                 juce::PathStrokeType::rounded));
+        g.setColour(HFXColours::orange);
+        g.strokePath(trace, juce::PathStrokeType(1.8f, juce::PathStrokeType::curved,
+                                                 juce::PathStrokeType::rounded));
+
         const float corr = processor.stereoCorrelation();
-        const auto meter = juce::Rectangle<float>(r.getX() + 22.0f, r.getBottom() - 24.0f,
-                                                   r.getWidth() - 44.0f, 6.0f);
-        g.setColour(HFXColours::grid);
-        g.fillRoundedRectangle(meter, 3.0f);
-        const float zeroX = meter.getX() + meter.getWidth() * 0.5f;
         g.setColour(HFXColours::muted);
-        g.drawVerticalLine((int)zeroX, meter.getY() - 3.0f, meter.getBottom() + 3.0f);
-        const float corrX = meter.getX() + (corr + 1.0f) * 0.5f * meter.getWidth();
-        g.setColour(corr < 0.0f ? juce::Colours::red : HFXColours::orange);
-        g.fillEllipse(corrX - 4.0f, meter.getY() - 1.0f, 8.0f, 8.0f);
-        g.setColour(HFXColours::muted);
-        g.drawText("−1", (int)meter.getX() - 4, (int)meter.getY() - 17, 24, 14, juce::Justification::left);
-        g.drawText("0", (int)zeroX - 6, (int)meter.getY() - 17, 12, 14, juce::Justification::centred);
-        g.drawText("+1", (int)meter.getRight() - 20, (int)meter.getY() - 17, 24, 14, juce::Justification::right);
-        g.setColour(HFXColours::muted);
-        g.drawText("STEREO FIELD  |  CORRELATION " + juce::String(corr, 2),
-                   r.toNearestInt().reduced(12, 8), juce::Justification::topLeft);
+        g.drawText("CORRELATION " + juce::String(corr, 2),
+                   r.toNearestInt().reduced(10, 22).withHeight(16),
+                   juce::Justification::topRight);
     }
     else // Limiter: peak history and ceiling line
     {
