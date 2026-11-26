@@ -52,6 +52,7 @@ public:
     float waveformAt(int index) const noexcept;
     float scopeXAt(int index) const noexcept;
     float scopeYAt(int index) const noexcept;
+    float polarLevelAt(int index) const noexcept;
     float compressorThresholdDb() const noexcept { return pThreshold->load(); }
     float compressorRatio() const noexcept { return pRatio->load(); }
     float saturationDriveDb() const noexcept { return pDrive->load(); }
@@ -127,6 +128,13 @@ private:
     juce::dsp::FFT fft { fftOrder };
     juce::dsp::WindowingFunction<float> window { fftSize, juce::dsp::WindowingFunction<float>::hann };
     std::array<float, fftSize * 2> fftData {};
+    std::array<float, fftSize * 2> fftLeftData {};
+    std::array<float, fftSize * 2> fftRightData {};
+    std::array<float, fftSize> fftLeftRing {};
+    std::array<float, fftSize> fftRightRing {};
+    int fftHopCounter = 0;
+    static constexpr int polarSize = 181;
+    std::array<std::atomic<float>, polarSize> polarLevels {};
     int fftWrite = 0;
     std::array<std::atomic<float>, fftSize / 2> spectrum {};
     std::atomic<int> spectrumVersion { 0 };

@@ -218,11 +218,15 @@ void HFXAudioProcessor::prepareToPlay(double sr, int)
     delayBuffer.clear();
     delayWrite = 0;
     for (auto& bin : spectrum) bin.store(0.0f);
+    for (auto& level : polarLevels) level.store(0.0f, std::memory_order_relaxed);
     for (auto& v : waveformHistory) v.store(0.0f);
     for (auto& v : scopeXHistory) v.store(0.0f);
     for (auto& v : scopeYHistory) v.store(0.0f);
     visualWrite.store(0);
     fftWrite = 0;
+    fftHopCounter = 0;
+    fftLeftRing.fill(0.0f);
+    fftRightRing.fill(0.0f);
     updateParameters();
 }
 
@@ -274,7 +278,6 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
     for (int c = getTotalNumInputChannels(); c < getTotalNumOutputChannels(); ++c)
         buffer.clear(c, 0, samples);
 
-    pushSpectrum(buffer);
     analyzeAutoMix(buffer);
 
     auto captureVisualsAndMeters = [this, &buffer, channels, samples]()
@@ -445,32 +448,75 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
     compressorGR.store(maxCompReduction, std::memory_order_relaxed);
     limiterGR.store(maxLimitReduction, std::memory_order_relaxed);
     captureVisualsAndMeters();
+    pushSpectrum(buffer); // Analyze processed output so Width and Pan changes are visible.
 }
 
 void HFXAudioProcessor::pushSpectrum(const juce::AudioBuffer<float>& b)
 {
     if (b.getNumChannels() == 0) return;
     const auto* l = b.getReadPointer(0);
-    const auto* r = b.getNumChannels() > 1 ? b.getReadPointer(1) : nullptr;
+    const auto* r = b.getNumChannels() > 1 ? b.getReadPointer(1) : l;
+    constexpr int hopSize = fftSize / 4;
     for (int n = 0; n < b.getNumSamples(); ++n)
     {
-        fftData[(size_t)fftWrite] = r != nullptr ? 0.5f * (l[n] + r[n]) : l[n];
-        if (++fftWrite == fftSize)
+        fftLeftRing[(size_t)fftWrite] = l[n];
+        fftRightRing[(size_t)fftWrite] = r[n];
+        if (++fftWrite == fftSize) fftWrite = 0;
+        if (++fftHopCounter < hopSize) continue;
+        fftHopCounter = 0;
+
+        // Copy the most recent window in chronological order. A 75% overlap
+        // gives a responsive 4x update rate while retaining 4096-point resolution.
+        for (int i = 0; i < fftSize; ++i)
         {
-            std::fill(fftData.begin() + fftSize, fftData.end(), 0.0f);
-            window.multiplyWithWindowingTable(fftData.data(), fftSize);
-            fft.performFrequencyOnlyForwardTransform(fftData.data());
-            // Hann-window coherent-gain correction, then a stable -90..0 dB display range.
-            for (int i = 0; i < fftSize / 2; ++i)
-            {
-                const float magnitude = fftData[(size_t)i] / (float)(fftSize * 0.25);
-                const float db = juce::Decibels::gainToDecibels(magnitude, -90.0f);
-                const float display = juce::jlimit(0.0f, 1.0f, (db + 90.0f) / 90.0f);
-                spectrum[(size_t)i].store(display, std::memory_order_relaxed);
-            }
-            spectrumVersion.fetch_add(1, std::memory_order_release);
-            fftWrite = 0;
+            const int source = (fftWrite + i) % fftSize;
+            const float leftSample = fftLeftRing[(size_t)source];
+            const float rightSample = fftRightRing[(size_t)source];
+            fftData[(size_t)i] = 0.5f * (leftSample + rightSample);
+            fftLeftData[(size_t)i] = leftSample;
+            fftRightData[(size_t)i] = rightSample;
         }
+        std::fill(fftData.begin() + fftSize, fftData.end(), 0.0f);
+        std::fill(fftLeftData.begin() + fftSize, fftLeftData.end(), 0.0f);
+        std::fill(fftRightData.begin() + fftSize, fftRightData.end(), 0.0f);
+        window.multiplyWithWindowingTable(fftData.data(), fftSize);
+        window.multiplyWithWindowingTable(fftLeftData.data(), fftSize);
+        window.multiplyWithWindowingTable(fftRightData.data(), fftSize);
+        fft.performFrequencyOnlyForwardTransform(fftData.data());
+        fft.performFrequencyOnlyForwardTransform(fftLeftData.data());
+        fft.performFrequencyOnlyForwardTransform(fftRightData.data());
+
+        std::array<float, polarSize> sectorPeak {};
+        constexpr float coherentGainScale = 1.0f / (float)(fftSize * 0.25);
+        for (int i = 1; i < fftSize / 2; ++i)
+        {
+            const float hz = (float)i * (float)sampleRateHz / (float)fftSize;
+            if (hz < 25.0f || hz > 18000.0f || hz > (float)sampleRateHz * 0.48f) continue;
+            const float magL = fftLeftData[(size_t)i] * coherentGainScale;
+            const float magR = fftRightData[(size_t)i] * coherentGainScale;
+            const float sum = magL + magR;
+            if (sum < 1.0e-7f) continue;
+            const float pan = magR / sum;
+            const int sector = juce::jlimit(0, polarSize - 1, (int)std::round(pan * (float)(polarSize - 1)));
+            const float combined = std::sqrt(0.5f * (magL * magL + magR * magR));
+            sectorPeak[(size_t)sector] = juce::jmax(sectorPeak[(size_t)sector], combined);
+        }
+        for (int i = 0; i < fftSize / 2; ++i)
+        {
+            const float magnitude = fftData[(size_t)i] * coherentGainScale;
+            const float db = juce::Decibels::gainToDecibels(magnitude, -90.0f);
+            spectrum[(size_t)i].store(juce::jlimit(0.0f, 1.0f, (db + 90.0f) / 90.0f), std::memory_order_relaxed);
+        }
+        for (int sector = 0; sector < polarSize; ++sector)
+        {
+            const float db = juce::Decibels::gainToDecibels(sectorPeak[(size_t)sector], -90.0f);
+            const float target = juce::jlimit(0.0f, 1.0f, (db + 72.0f) / 66.0f);
+            const float previous = polarLevels[(size_t)sector].load(std::memory_order_relaxed);
+            const float smoothed = target > previous ? previous + 0.72f * (target - previous)
+                                                      : previous + 0.24f * (target - previous);
+            polarLevels[(size_t)sector].store(smoothed, std::memory_order_relaxed);
+        }
+        spectrumVersion.fetch_add(1, std::memory_order_release);
     }
 }
 
@@ -562,6 +608,11 @@ float HFXAudioProcessor::scopeYAt(int index) const noexcept
     const int write = visualWrite.load(std::memory_order_acquire);
     const int slot = (write - visualSize + index + visualSize * 2) % visualSize;
     return scopeYHistory[(size_t)slot].load(std::memory_order_relaxed);
+}
+
+float HFXAudioProcessor::polarLevelAt(int index) const noexcept
+{
+    return (index >= 0 && index < polarSize) ? polarLevels[(size_t)index].load(std::memory_order_relaxed) : 0.0f;
 }
 
 void HFXAudioProcessor::requestAutoMix() noexcept
