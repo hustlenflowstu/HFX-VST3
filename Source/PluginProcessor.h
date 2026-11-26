@@ -61,6 +61,8 @@ public:
     float rightPeakDb() const noexcept { return rightPeak.load(); }
     float stereoCorrelation() const noexcept { return stereoCorrelationValue.load(std::memory_order_relaxed); }
     float outputRmsDb() const noexcept { return outputRms.load(); }
+    void setEqSolo(bool enabled, int band) noexcept { eqSoloBand.store(enabled ? juce::jlimit(0, 4, band) : -1, std::memory_order_relaxed); }
+    bool isEqSoloEnabled() const noexcept { return eqSoloBand.load(std::memory_order_relaxed) >= 0; }
 
 private:
     juce::AudioProcessorValueTreeState apvts;
@@ -70,12 +72,15 @@ private:
         float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f;
         float z1 = 0.0f, z2 = 0.0f;
         void setPeak(double sr, float freq, float q, float gainDb) noexcept;
+        void setBandPass(double sr, float freq, float q) noexcept;
         void setFilter(double sr, float freq, float q, float gainDb, int type) noexcept;
         float process(float x) noexcept;
         float magnitudeAt(double sr, float frequencyHz) const noexcept;
         void reset() noexcept { z1 = z2 = 0.0f; }
     };
     std::array<std::array<std::array<Biquad, 4>, 5>, 2> eq;
+    std::array<Biquad, 2> eqSoloFilters;
+    std::atomic<int> eqSoloBand { -1 };
     std::array<std::atomic<float>*, 5> pEqBandFreq {};
     std::array<std::atomic<float>*, 5> pEqBandGain {};
     // Legacy filter-type parameters remain registered for old sessions, but the EQ

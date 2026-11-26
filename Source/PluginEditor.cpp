@@ -336,9 +336,18 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
     tabs[0].setToggleState(true, juce::dontSendNotification);
 
     addAndMakeVisible(spectrumView);
+    eqSoloButton.setClickingTogglesState(true);
+    eqSoloButton.onClick = [this]
+    {
+        processor.setEqSolo(eqSoloButton.getToggleState(), selectedEqBand);
+        eqSoloButton.setButtonText(eqSoloButton.getToggleState() ? "SOLO ON" : "SOLO SELECTED BAND");
+    };
+    eqSoloButton.setColour(juce::TextButton::buttonOnColourId, HFXColours::orange);
+    addAndMakeVisible(eqSoloButton);
     spectrumView.onBandSelected = [this](int band)
     {
         selectedEqBand = juce::jlimit(0, 4, band);
+        if (eqSoloButton.getToggleState()) processor.setEqSolo(true, selectedEqBand);
         rebuildAttachments();
         resized();
     };
@@ -358,6 +367,11 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
     leftMeterText.setColour(juce::Label::textColourId, HFXColours::orange);
     rightMeterText.setColour(juce::Label::textColourId, HFXColours::orange);
     rmsText.setColour(juce::Label::textColourId, HFXColours::muted);
+    for (auto* meter : { &leftMeterText, &rightMeterText, &rmsText })
+    {
+        meter->setFont(juce::Font(9.5f, juce::Font::bold));
+        meter->setJustificationType(juce::Justification::centredRight);
+    }
     addAndMakeVisible(leftMeterText); addAndMakeVisible(rightMeterText); addAndMakeVisible(rmsText);
     rebuildAttachments();
     startTimerHz(30);
@@ -384,9 +398,16 @@ void HFXAudioProcessorEditor::refreshPresetChoices()
 void HFXAudioProcessorEditor::selectTab(int index)
 {
     activeTab = juce::jlimit(0, 4, index);
+    if (activeTab != 0 && eqSoloButton.getToggleState())
+    {
+        eqSoloButton.setToggleState(false, juce::dontSendNotification);
+        eqSoloButton.setButtonText("SOLO SELECTED BAND");
+        processor.setEqSolo(false, selectedEqBand);
+    }
     for (int i = 0; i < panelModeCount; ++i)
         tabs[(size_t)i].setToggleState(i == activeTab, juce::dontSendNotification);
     spectrumView.setDisplayMode(activeTab);
+    eqSoloButton.setVisible(activeTab == 0);
     rebuildAttachments();
     resized();
     repaint();
@@ -518,7 +539,7 @@ void HFXAudioProcessorEditor::timerCallback()
     spectrumView.repaint();
     leftMeterText.setText("L PEAK  " + juce::String(processor.leftPeakDb(), 1) + " dBFS", juce::dontSendNotification);
     rightMeterText.setText("R PEAK  " + juce::String(processor.rightPeakDb(), 1) + " dBFS", juce::dontSendNotification);
-    rmsText.setText("OUTPUT RMS  " + juce::String(processor.outputRmsDb(), 1) + " dBFS", juce::dontSendNotification);
+    rmsText.setText("OUT RMS  " + juce::String(processor.outputRmsDb(), 1) + " dBFS", juce::dontSendNotification);
     if (autoMixWaitTicks > 0 && !processor.autoMixReady())
     {
         --autoMixWaitTicks;
@@ -586,11 +607,14 @@ void HFXAudioProcessorEditor::resized()
     spectrumView.setBounds(30, 185, getWidth() - 130, graphHeight);
     const int graphBottom = 185 + graphHeight;
     const int utilityY = graphBottom + 8;
-    bypass.setBounds(30, utilityY, 90, 24);
-    status.setBounds(135, utilityY, getWidth() - 245, 24);
-    leftMeterText.setBounds(getWidth() - 110, 555, 100, 18);
-    rightMeterText.setBounds(getWidth() - 110, 575, 100, 18);
-    rmsText.setBounds(getWidth() - 110, 595, 100, 18);
+    bypass.setBounds(30, utilityY, 82, 22);
+    eqSoloButton.setBounds(120, utilityY, 142, 22);
+    eqSoloButton.setVisible(activeTab == 0);
+    status.setBounds(275, utilityY, juce::jmax(180, getWidth() - 565), 22);
+    const int meterX = getWidth() - 282;
+    leftMeterText.setBounds(meterX, utilityY, 252, 14);
+    rightMeterText.setBounds(meterX, utilityY + 14, 252, 14);
+    rmsText.setBounds(meterX, utilityY + 28, 252, 14);
 
     const int available = getWidth() - 210;
     const int cell = available / 4;

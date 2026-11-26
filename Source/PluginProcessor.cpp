@@ -21,6 +21,21 @@ void HFXAudioProcessor::Biquad::setPeak(double sr, float freq, float q, float ga
 
 
 
+void HFXAudioProcessor::Biquad::setBandPass(double sr, float freq, float q) noexcept
+{
+    const double fs = juce::jmax(1000.0, sr);
+    const double f = juce::jlimit(10.0, fs * 0.45, (double)freq);
+    const double quality = juce::jlimit(0.2, 8.0, (double)q);
+    const double w0 = 2.0 * juce::MathConstants<double>::pi * f / fs;
+    const double alpha = std::sin(w0) / (2.0 * quality);
+    const double a0 = 1.0 + alpha;
+    b0 = (float)(alpha / a0);
+    b1 = 0.0f;
+    b2 = (float)(-alpha / a0);
+    a1 = (float)(-2.0 * std::cos(w0) / a0);
+    a2 = (float)((1.0 - alpha) / a0);
+}
+
 void HFXAudioProcessor::Biquad::setFilter(double sr, float freq, float q, float gainDb, int type) noexcept
 {
     const float fs = (float)juce::jmax(1000.0, sr);
@@ -264,6 +279,13 @@ void HFXAudioProcessor::updateParameters()
             for (int stage = 1; stage < 4; ++stage)
                 eq[(size_t)ch][(size_t)band][(size_t)stage].setPeak(sampleRateHz, 1000.0f, 0.707f, 0.0f);
         }
+    const int soloBand = eqSoloBand.load(std::memory_order_relaxed);
+    if (soloBand >= 0)
+    {
+        const float soloFreq = pEqBandFreq[(size_t)soloBand]->load(std::memory_order_relaxed);
+        const float soloQ = pEqBandQ[(size_t)soloBand]->load(std::memory_order_relaxed);
+        for (auto& filter : eqSoloFilters) filter.setBandPass(sampleRateHz, soloFreq, soloQ);
+    }
 }
 
 void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -368,11 +390,22 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
         float xL = left[n] * inputGain;
         float xR = right != nullptr ? right[n] * inputGain : xL;
 
-        for (int band = 0; band < 5; ++band)
+        const int soloBandNow = eqSoloBand.load(std::memory_order_relaxed);
+        if (soloBandNow >= 0)
         {
-            xL = eq[0][(size_t)band][0].process(xL);
-            if (right != nullptr)
-                xR = eq[1][(size_t)band][0].process(xR);
+            // Band-solo audition: isolate the selected frequency region without
+            // changing the saved EQ gain or other band settings.
+            xL = eqSoloFilters[0].process(xL);
+            if (right != nullptr) xR = eqSoloFilters[1].process(xR);
+        }
+        else
+        {
+            for (int band = 0; band < 5; ++band)
+            {
+                xL = eq[0][(size_t)band][0].process(xL);
+                if (right != nullptr)
+                    xR = eq[1][(size_t)band][0].process(xR);
+            }
         }
 
         // Stereo-linked RMS compressor detector: both channels receive the same gain.

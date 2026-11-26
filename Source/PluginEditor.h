@@ -33,6 +33,7 @@ private:
     juce::Label logo, moduleTitle, status, leftMeterText, rightMeterText, rmsText;
     juce::ComboBox trackMode, stemRole, presetBox;
     juce::TextButton autoMix { "AUTO-MIX" }, bypass { "BYPASS" };
+    juce::TextButton eqSoloButton { "SOLO SELECTED BAND" };
     std::array<juce::TextButton, 5> tabs;
     std::array<juce::Slider, 10> knobs;
     std::array<juce::Label, 10> knobLabels;
