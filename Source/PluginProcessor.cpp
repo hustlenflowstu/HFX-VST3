@@ -283,7 +283,7 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
         const auto* r = channels > 1 ? buffer.getReadPointer(1) : l;
         int write = visualWrite.load(std::memory_order_relaxed);
         float peakL = 0.0f, peakR = 0.0f;
-        double sumSq = 0.0;
+        double sumSq = 0.0, sumL2 = 0.0, sumR2 = 0.0, sumLR = 0.0;
         for (int n = 0; n < samples; ++n)
         {
             const int slot = write++ % visualSize;
@@ -295,13 +295,19 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
             peakL = juce::jmax(peakL, std::abs(left));
             peakR = juce::jmax(peakR, std::abs(right));
             sumSq += (double)left * left;
-        if (channels > 1) sumSq += (double)right * right;
+            sumL2 += (double)left * left;
+            sumR2 += (double)right * right;
+            sumLR += (double)left * right;
+            if (channels > 1) sumSq += (double)right * right;
         }
         visualWrite.store(write, std::memory_order_release);
         leftPeak.store(juce::Decibels::gainToDecibels(peakL, -90.0f), std::memory_order_relaxed);
         rightPeak.store(juce::Decibels::gainToDecibels(channels > 1 ? peakR : peakL, -90.0f), std::memory_order_relaxed);
         const double count = (double)juce::jmax(1, samples * channels);
         outputRms.store(juce::Decibels::gainToDecibels((float)std::sqrt(sumSq / count), -90.0f), std::memory_order_relaxed);
+        const double corrDenom = std::sqrt(sumL2 * sumR2);
+        const float corr = (channels > 1 && corrDenom > 1.0e-20) ? (float)(sumLR / corrDenom) : 1.0f;
+        stereoCorrelationValue.store(juce::jlimit(-1.0f, 1.0f, corr), std::memory_order_relaxed);
     };
 
     if (pBypass->load(std::memory_order_relaxed) > 0.5f)

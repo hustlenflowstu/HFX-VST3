@@ -189,16 +189,43 @@ void HFXSpectrumView::paint(juce::Graphics& g)
         g.drawEllipse(c.x - radius * 0.66f, c.y - radius * 0.66f, radius * 1.32f, radius * 1.32f, 1.0f);
         g.drawLine(c.x - radius, c.y, c.x + radius, c.y, 1.0f);
         g.drawLine(c.x, c.y - radius, c.x, c.y + radius, 1.0f);
-        juce::Path cloud;
+        // Standard normalized mid/side vectorscope:
+        // X = (L - R) / sqrt(2), Y = (L + R) / sqrt(2).
+        // This removes the previous arbitrary 1.8x visual magnification.
+        g.setColour(HFXColours::grid.withAlpha(0.8f));
+        g.drawLine(c.x - radius, c.y - radius, c.x + radius, c.y + radius, 0.8f);
+        g.drawLine(c.x - radius, c.y + radius, c.x + radius, c.y - radius, 0.8f);
+        const float norm = 0.70710678f;
         for (int i = 0; i < 512; ++i)
         {
-            const float x = c.x + processor.scopeXAt(i) * radius * 1.8f;
-            const float y = c.y - processor.scopeYAt(i) * radius * 1.8f;
-            if (i == 0) cloud.startNewSubPath(x, y); else cloud.lineTo(x, y);
+            const float side = processor.scopeXAt(i);
+            const float mid = processor.scopeYAt(i);
+            const float xNorm = juce::jlimit(-1.0f, 1.0f, side * 1.41421356f);
+            const float yNorm = juce::jlimit(-1.0f, 1.0f, mid * 1.41421356f);
+            const float x = c.x + xNorm * radius;
+            const float y = c.y - yNorm * radius;
+            g.setColour(HFXColours::orange.withAlpha(0.34f));
+            g.fillEllipse(x - 1.5f, y - 1.5f, 3.0f, 3.0f);
         }
-        g.setColour(HFXColours::orange.withAlpha(0.20f)); g.strokePath(cloud, juce::PathStrokeType(7.0f));
-        g.setColour(HFXColours::orange); g.strokePath(cloud, juce::PathStrokeType(1.5f));
-        g.setColour(HFXColours::muted); g.drawText("LIVE STEREO VECTORSCOPE / L-R", r.toNearestInt().reduced(12, 8), juce::Justification::topLeft);
+        // Correlation meter: -1 = out of phase, 0 = uncorrelated, +1 = mono-compatible.
+        const float corr = processor.stereoCorrelation();
+        const auto meter = juce::Rectangle<float>(r.getX() + 22.0f, r.getBottom() - 24.0f,
+                                                   r.getWidth() - 44.0f, 6.0f);
+        g.setColour(HFXColours::grid);
+        g.fillRoundedRectangle(meter, 3.0f);
+        const float zeroX = meter.getX() + meter.getWidth() * 0.5f;
+        g.setColour(HFXColours::muted);
+        g.drawVerticalLine((int)zeroX, meter.getY() - 3.0f, meter.getBottom() + 3.0f);
+        const float corrX = meter.getX() + (corr + 1.0f) * 0.5f * meter.getWidth();
+        g.setColour(corr < 0.0f ? juce::Colours::red : HFXColours::orange);
+        g.fillEllipse(corrX - 4.0f, meter.getY() - 1.0f, 8.0f, 8.0f);
+        g.setColour(HFXColours::muted);
+        g.drawText("−1", (int)meter.getX() - 4, (int)meter.getY() - 17, 24, 14, juce::Justification::left);
+        g.drawText("0", (int)zeroX - 6, (int)meter.getY() - 17, 12, 14, juce::Justification::centred);
+        g.drawText("+1", (int)meter.getRight() - 20, (int)meter.getY() - 17, 24, 14, juce::Justification::right);
+        g.setColour(HFXColours::muted);
+        g.drawText("STEREO FIELD  |  CORRELATION " + juce::String(corr, 2),
+                   r.toNearestInt().reduced(12, 8), juce::Justification::topLeft);
     }
     else // Limiter: peak history and ceiling line
     {

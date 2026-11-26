@@ -58,6 +58,7 @@ public:
     float limiterCeilingDb() const noexcept { return pCeiling->load(); }
     float leftPeakDb() const noexcept { return leftPeak.load(); }
     float rightPeakDb() const noexcept { return rightPeak.load(); }
+    float stereoCorrelation() const noexcept { return stereoCorrelationValue.load(std::memory_order_relaxed); }
     float outputRmsDb() const noexcept { return outputRms.load(); }
 
 private:
@@ -118,6 +119,7 @@ private:
     std::atomic<float>* pBypass = nullptr;
 
     std::atomic<float> leftPeak { -90.0f }, rightPeak { -90.0f }, outputRms { -90.0f };
+    std::atomic<float> stereoCorrelationValue { 1.0f };
     std::atomic<float> compressorGR { 0.0f }, limiterGR { 0.0f };
 
     static constexpr int fftOrder = 12;
