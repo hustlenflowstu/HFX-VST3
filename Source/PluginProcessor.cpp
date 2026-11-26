@@ -334,7 +334,6 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
     const float drive = juce::Decibels::decibelsToGain(pDrive->load(std::memory_order_relaxed));
     const float satMix = pSatMix->load(std::memory_order_relaxed);
     const float tone = pTone->load(std::memory_order_relaxed);
-    const float warmth = pWarmth->load(std::memory_order_relaxed);
     const float thresholdDb = pThreshold->load(std::memory_order_relaxed);
     const float ratio = juce::jmax(1.0f, pRatio->load(std::memory_order_relaxed));
     const float attackCoeff = std::exp(-1.0f / (0.001f * pAttack->load(std::memory_order_relaxed) * (float)sampleRateHz));
@@ -345,14 +344,10 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
     const float transientCoeff = std::exp(-1.0f / (0.002f * (float)sampleRateHz));
     const float toneCoeff = std::exp(-1.0f / (0.001f * 2.0f * (float)sampleRateHz));
     const float width = pWidth->load(std::memory_order_relaxed);
-    const float pan = juce::jlimit(-1.0f, 1.0f, pPan->load(std::memory_order_relaxed));
-    const float panLeft = pan > 0.0f ? std::cos(pan * juce::MathConstants<float>::halfPi) : 1.0f;
-    const float panRight = pan < 0.0f ? std::cos(-pan * juce::MathConstants<float>::halfPi) : 1.0f;
-    const float monoFreq = pMonoFreq->load(std::memory_order_relaxed);
-    const float monoCoeff = std::exp(-2.0f * juce::MathConstants<float>::pi * monoFreq / (float)sampleRateHz);
-    const int delayCapacity = delayBuffer.getNumSamples();
-    const int delaySamples = juce::jlimit(0, juce::jmax(0, delayCapacity - 1),
-        (int)std::round(pHaasMs->load(std::memory_order_relaxed) * 0.001 * sampleRateHz));
+    const float panL = pLeftPan != nullptr ? juce::jlimit(-1.0f, 1.0f, pLeftPan->load(std::memory_order_relaxed)) : -1.0f;
+    const float panR = pRightPan != nullptr ? juce::jlimit(-1.0f, 1.0f, pRightPan->load(std::memory_order_relaxed)) : 1.0f;
+    const float panLeft = std::cos((panL + 1.0f) * 0.25f * juce::MathConstants<float>::pi);
+    const float panRight = std::cos((1.0f - panR) * 0.25f * juce::MathConstants<float>::pi);
 
     float maxCompReduction = 0.0f;
     float maxLimitReduction = 0.0f;
@@ -407,9 +402,8 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
             const float low = toneLowState[(size_t)channel];
             const float high = x - low;
             const float tilted = low * (1.0f - tone * 0.35f) + high * (1.0f + tone * 0.35f);
-            const float bias = warmth * 0.12f;
-            const float norm = juce::jmax(0.001f, std::tanh(drive * (1.0f + std::abs(bias))));
-            const float wet = (std::tanh((tilted + bias) * drive) - std::tanh(bias * drive)) / norm;
+            const float norm = juce::jmax(0.001f, std::tanh(drive));
+            const float wet = std::tanh(tilted * drive) / norm;
             return x * (1.0f - satMix) + wet * satMix;
         };
         xL = saturate(xL, 0);
@@ -428,31 +422,12 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
 
         if (right != nullptr)
         {
-            // Mid/side width plus low-frequency mono-maker.
+            // Mid/side width followed by independent constant-power left/right pan.
             const float mid = 0.5f * (xL + xR);
             const float side = 0.5f * (xL - xR);
-            stereoSideLowState = monoCoeff * stereoSideLowState + (1.0f - monoCoeff) * side;
-            const float monoSide = side - stereoSideLowState;
-            const float widenedSide = (monoSide + stereoSideLowState * 0.0f) * width;
+            const float widenedSide = side * width;
             xL = (mid + widenedSide) * panLeft;
             xR = (mid - widenedSide) * panRight;
-
-            // Haas widening is blended conservatively to avoid a full-level delayed duplicate.
-            if (delaySamples > 0 && delayCapacity > delaySamples)
-            {
-                const int readIndex = (delayWrite - delaySamples + delayCapacity) % delayCapacity;
-                const float delayedLeft = delayBuffer.getReadPointer(0)[readIndex];
-                delayBuffer.setSample(0, delayWrite, xL);
-                delayBuffer.setSample(1, delayWrite, xR);
-                xR = 0.75f * xR + 0.25f * delayedLeft;
-                if (++delayWrite >= delayCapacity) delayWrite = 0;
-            }
-            else if (delayCapacity > 0)
-            {
-                delayBuffer.setSample(0, delayWrite, xL);
-                delayBuffer.setSample(1, delayWrite, xR);
-                if (++delayWrite >= delayCapacity) delayWrite = 0;
-            }
         }
 
         left[n] = xL;
@@ -556,10 +531,8 @@ float HFXAudioProcessor::eqResponseDbAt(float frequencyHz) const noexcept
 float HFXAudioProcessor::saturationTransfer(float input) const noexcept
 {
     const float drive = juce::Decibels::decibelsToGain(pDrive->load(std::memory_order_relaxed));
-    const float warmth = pWarmth->load(std::memory_order_relaxed);
-    const float bias = warmth * 0.12f;
-    const float norm = juce::jmax(0.001f, std::tanh(drive * (1.0f + std::abs(bias))));
-    return (std::tanh((input + bias) * drive) - std::tanh(bias * drive)) / norm;
+    const float norm = juce::jmax(0.001f, std::tanh(drive));
+    return std::tanh(input * drive) / norm;
 }
 
 float HFXAudioProcessor::waveformAt(int index) const noexcept

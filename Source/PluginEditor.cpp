@@ -344,7 +344,8 @@ void HFXAudioProcessorEditor::rebuildAttachments()
     for (auto& attachment : attachments) attachment.reset();
     for (int i = 0; i < 10; ++i)
     {
-        const bool used = i < 4;
+        const int visibleCount = (activeTab == 2 || activeTab == 3) ? 3 : 4;
+        const bool used = i < visibleCount;
         knobLabels[(size_t)i].setVisible(used);
         knobs[(size_t)i].setVisible(used);
         if (!used) continue;
