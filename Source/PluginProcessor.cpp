@@ -144,6 +144,7 @@ HFXAudioProcessor::HFXAudioProcessor()
     pHaasMs = apvts.getRawParameterValue("haasMs");
     pTransient = apvts.getRawParameterValue("transient");
     pInputGain = apvts.getRawParameterValue("inputGain");
+    pUtilityGain = apvts.getRawParameterValue("utilityGain");
     pCeiling = apvts.getRawParameterValue("ceiling");
     pLimitRelease = apvts.getRawParameterValue("limitRelease");
     pTrackMode = apvts.getRawParameterValue("trackMode");
@@ -199,6 +200,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout HFXAudioProcessor::makeParam
     f("haasMs", "Haas Delay", { 0.0f, 30.0f, 0.1f }, 0.0f, "ms");
     f("transient", "Transient", { 0.0f, 1.0f, 0.01f }, 0.0f);
     f("inputGain", "Input Gain", { -12.0f, 18.0f, 0.1f }, 0.0f, "dB");
+    f("utilityGain", "Utility Gain", { -24.0f, 24.0f, 0.01f }, 0.0f, "dB");
     f("ceiling", "Ceiling", { -12.0f, 0.0f, 0.1f }, -1.0f, "dB");
     f("limitRelease", "Limiter Release", { 10.0f, 500.0f, 1.0f }, 80.0f, "ms");
     params.push_back(std::make_unique<AudioParameterChoice>(
@@ -452,6 +454,13 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
         };
         xL = saturate(xL, 0);
         if (right != nullptr) xR = saturate(xR, 1);
+
+        // Utility is the final gain stage before peak protection so its gain
+        // remains controlled by the downstream limiter ceiling.
+        const float utilityGainDb = pUtilityGain != nullptr ? pUtilityGain->load(std::memory_order_relaxed) : 0.0f;
+        const float utilityLinear = juce::Decibels::decibelsToGain(utilityGainDb);
+        xL *= utilityLinear;
+        if (right != nullptr) xR *= utilityLinear;
 
         // Linked sample-peak limiter with immediate attack and smoothed release.
         const float peak = right != nullptr ? juce::jmax(std::abs(xL), std::abs(xR)) : std::abs(xL);

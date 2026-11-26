@@ -118,6 +118,7 @@ private:
     std::atomic<float>* pHaasMs = nullptr;
     std::atomic<float>* pTransient = nullptr;
     std::atomic<float>* pInputGain = nullptr;
+    std::atomic<float>* pUtilityGain = nullptr;
     std::atomic<float>* pCeiling = nullptr;
     std::atomic<float>* pLimitRelease = nullptr;
     std::atomic<float>* pTrackMode = nullptr;

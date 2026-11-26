@@ -2,7 +2,7 @@
 
 namespace
 {
-    constexpr int panelModeCount = 5;
+    constexpr int panelModeCount = 6;
     const juce::StringArray vocalPresets = []
     {
         juce::StringArray a;
@@ -18,13 +18,14 @@ namespace
     const juce::StringArray beatPresets = []
     {
         juce::StringArray a;
-        const char* groups[7][10] = {
+        const char* groups[8][10] = {
             {"Kick - Deep Trap", "Kick - Punch Attack", "Kick - Tight Short", "Kick - Warm Round", "Kick - Sub Focus", "Kick - Modern Knock", "Kick - Dry Studio", "Kick - Heavy Impact", "Kick - Clean Transient", "Kick - Balanced"},
             {"Snare - Clean Crack", "Snare - Tight Pop", "Snare - Body Punch", "Snare - Dark Punch", "Snare - Bright Snap", "Snare - Trap Rim", "Snare - Dry Knock", "Snare - Modern Snap", "Snare - Clean Studio", "Snare - Balanced"},
             {"Perc - Clean Groove", "Perc - Bright Tick", "Perc - Warm Hand", "Perc - Tight Transient", "Perc - Organic", "Perc - Afro Groove", "Perc - Dark Texture", "Perc - Punch Layer", "Perc - Clean Detail", "Perc - Balanced"},
-            {"Hi-Hat - Crisp Trap", "Hi-Hat - Smooth Top", "Hi-Hat - Tight Dry", "Hi-Hat - Bright Roll", "Hi-Hat - Dark Control", "Hi-Hat - Open Air", "Hi-Hat - Soft Tick", "Hi-Hat - Modern Drill", "Hi-Hat - Clean Detail", "Hi-Hat - Balanced"},
-            {"808 - Clean Sub", "808 - Tight Mono", "808 - Deep Round", "808 - Controlled Harmonics", "808 - Punch Bass", "808 - Dark Heavy", "808 - Smooth Sustain", "808 - Clean Drill", "808 - Balanced Low End", "808 - Studio Sub"},
+            {"Closed Hat - Crisp Trap", "Closed Hat - Smooth Top", "Closed Hat - Tight Dry", "Closed Hat - Bright Roll", "Closed Hat - Dark Control", "Closed Hat - Soft Tick", "Closed Hat - Modern Drill", "Closed Hat - Clean Detail", "Closed Hat - Balanced", "Closed Hat - Studio"},
+            {"Open Hat - Bright Air", "Open Hat - Smooth", "Open Hat - Wide Lift", "Open Hat - Tight", "Open Hat - Dark Control", "Open Hat - Clean Tail", "Open Hat - Modern Trap", "Open Hat - Soft Air", "Open Hat - Crisp", "Open Hat - Balanced"},
             {"EFX - Riser Clean", "EFX - Riser Bright", "EFX - Uplifter Tight", "EFX - Downlifter", "EFX - Impact Punch", "EFX - Sweep Wide", "EFX - Transition Clean", "EFX - Reverse FX", "EFX - Noise Sweep", "EFX - Filler Control"},
+            {"808 - Clean Sub", "808 - Tight Mono", "808 - Deep Round", "808 - Controlled Harmonics", "808 - Punch Bass", "808 - Dark Heavy", "808 - Smooth Sustain", "808 - Clean Drill", "808 - Balanced Low End", "808 - Studio Sub"},
             {"Melody - Clean Keys", "Melody - Piano Clear", "Melody - Synth Smooth", "Melody - Pluck Detail", "Melody - Pad Control", "Melody - Bell Bright", "Melody - Guitar Clean", "Melody - Wide Synth", "Melody - Warm Keys", "Melody - Balanced Music"}
         };
         for (const auto& group : groups) for (auto* name : group) a.add(name);
@@ -303,7 +304,15 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
     trackMode.onChange = [this]
     {
         const bool beatMode = trackMode.getSelectedId() == 2;
-        stemRole.setVisible(beatMode);
+        stemRole.setVisible(activeTab != 5 && beatMode);
+        trackMode.setVisible(activeTab != 5);
+        presetBox.setVisible(activeTab != 5);
+        autoMix.setVisible(activeTab != 5);
+        bypass.setVisible(activeTab != 5);
+        status.setVisible(activeTab != 5);
+        leftMeterText.setVisible(activeTab != 5);
+        rightMeterText.setVisible(activeTab != 5);
+        rmsText.setVisible(activeTab != 5);
         refreshPresetChoices();
         resized();
     };
@@ -326,7 +335,7 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
     addAndMakeVisible(bypass);
     bypassAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.state(), "bypass", bypass);
 
-    const juce::String tabNames[] { "AUTO-EQ", "COMPRESSOR", "SATURATOR", "PAN & WIDTH", "LIMITER" };
+    const juce::String tabNames[] { "AUTO-EQ", "COMPRESSOR", "SATURATOR", "PAN & WIDTH", "LIMITER", "UTILITY" };
     for (int i = 0; i < panelModeCount; ++i)
     {
         tabs[(size_t)i].setButtonText(tabNames[i]);
@@ -393,7 +402,7 @@ void HFXAudioProcessorEditor::refreshPresetChoices()
     const auto& choices = beat ? beatPresets : vocalPresets;
     if (beat)
     {
-        const int category = juce::jlimit(0, 6, stemRole.getSelectedId() - 1);
+        const int category = juce::jlimit(0, 7, stemRole.getSelectedId() - 1);
         const int first = category * 10;
         for (int i = 0; i < 10; ++i)
             presetBox.addItem(choices[first + i], first + i + 1);
@@ -409,7 +418,7 @@ void HFXAudioProcessorEditor::refreshPresetChoices()
 
 void HFXAudioProcessorEditor::selectTab(int index)
 {
-    activeTab = juce::jlimit(0, 4, index);
+    activeTab = juce::jlimit(0, 5, index);
     if (activeTab != 0 && eqSoloButton.getToggleState())
     {
         eqSoloButton.setToggleState(false, juce::dontSendNotification);
@@ -419,6 +428,16 @@ void HFXAudioProcessorEditor::selectTab(int index)
     for (int i = 0; i < panelModeCount; ++i)
         tabs[(size_t)i].setToggleState(i == activeTab, juce::dontSendNotification);
     spectrumView.setDisplayMode(activeTab);
+    spectrumView.setVisible(activeTab != 5);
+    trackMode.setVisible(activeTab != 5);
+    stemRole.setVisible(activeTab != 5 && trackMode.getSelectedId() == 2);
+    presetBox.setVisible(activeTab != 5);
+    autoMix.setVisible(activeTab != 5);
+    bypass.setVisible(activeTab != 5);
+    status.setVisible(activeTab != 5);
+    leftMeterText.setVisible(activeTab != 5);
+    rightMeterText.setVisible(activeTab != 5);
+    rmsText.setVisible(activeTab != 5);
     eqSoloButton.setVisible(activeTab == 0);
     rebuildAttachments();
     resized();
@@ -430,7 +449,7 @@ void HFXAudioProcessorEditor::rebuildAttachments()
     for (auto& attachment : attachments) attachment.reset();
     for (int i = 0; i < 10; ++i)
     {
-        const int visibleCount = (activeTab == 2 || activeTab == 3) ? 3 : 4;
+        const int visibleCount = activeTab == 5 ? 1 : ((activeTab == 2 || activeTab == 3) ? 3 : 4);
         const bool used = i < visibleCount;
         knobLabels[(size_t)i].setVisible(used);
         knobs[(size_t)i].setVisible(used);
@@ -462,114 +481,104 @@ void HFXAudioProcessorEditor::rebuildAttachments()
 
 void HFXAudioProcessorEditor::applyPreset(int id)
 {
-    // HFX curated starting profiles. These are starting points, not a promise
-    // of a finished mix: source level, mic, room, arrangement and performance vary.
-    struct Profile
-    {
-        float freq[5];
-        float gain[5];
-        float q[5];
-        float threshold, ratio, attack, release;
-        float drive, tone, satMix, width;
-        float input, ceiling, limiterRelease, transient;
-    };
-
     const bool beat = trackMode.getSelectedId() == 2;
-    const int safeId = juce::jlimit(1, beat ? 70 : 40, id);
+    const int safeId = juce::jlimit(1, beat ? 80 : 40, id);
     const int category = (safeId - 1) / 10;
     const int variation = (safeId - 1) % 10;
-
-    // Vocal groups: Rap, Melodic, R&B, Pop, Creative FX.
-    // Beat groups: Kick, Snare, Percussion, Hi-hat, 808.
-    static const Profile vocal[5] =
-    {
-        // Rap: controlled low-mid, intelligibility, firm but not crushed dynamics.
-        {{85, 250, 1100, 4200, 12500}, {-1.0f, -1.8f, 0.4f, 1.2f, 0.5f}, {0.80f, 1.10f, 0.90f, 0.85f, 0.70f},
-         -22.0f, 3.0f, 18.0f, 105.0f, 1.2f, 0.10f, 0.16f, 1.02f, -1.0f, -1.2f, 85.0f, 0.05f},
-        // Melodic: smoother upper mids, controlled peaks, restrained saturation.
-        {{90, 280, 1800, 5200, 14500}, {-0.8f, -1.0f, -0.5f, 0.8f, 0.8f}, {0.75f, 0.90f, 0.80f, 0.75f, 0.65f},
-         -24.0f, 2.6f, 24.0f, 135.0f, 0.8f, 0.18f, 0.12f, 1.06f, -1.0f, -1.3f, 100.0f, 0.02f},
-        // R&B: gentle body and air, slower compression.
-        {{75, 220, 900, 3800, 15000}, {-0.5f, -0.8f, 0.2f, 0.5f, 1.0f}, {0.70f, 0.85f, 0.80f, 0.75f, 0.65f},
-         -25.0f, 2.2f, 28.0f, 155.0f, 0.6f, 0.12f, 0.10f, 1.08f, -1.5f, -1.3f, 120.0f, 0.00f},
-        // Pop: clean presence and controlled top end.
-        {{100, 300, 1600, 4500, 13500}, {-1.2f, -1.0f, 0.2f, 1.0f, 0.8f}, {0.80f, 0.95f, 0.90f, 0.80f, 0.70f},
-         -23.0f, 2.8f, 16.0f, 115.0f, 0.9f, 0.08f, 0.13f, 1.04f, -1.0f, -1.2f, 90.0f, 0.03f},
-        // Clean vocal: neutral, controlled dynamics and restrained processing.
-        {{90, 260, 1200, 4200, 13500}, {-0.8f, -1.0f, 0.1f, 0.7f, 0.5f}, {0.75f, 0.90f, 0.85f, 0.80f, 0.70f},
-         -24.0f, 2.5f, 22.0f, 125.0f, 0.5f, 0.05f, 0.10f, 1.00f, -1.5f, -1.2f, 100.0f, 0.02f}
-    };
-
-    static const Profile beatProfiles[7] =
-    {
-        // Kick: sub foundation, controlled click and transient.
-        {{45, 90, 250, 2500, 9000}, {1.0f, -0.8f, -1.5f, 0.7f, -0.5f}, {0.75f, 0.90f, 1.00f, 0.85f, 0.70f},
-         -15.0f, 3.0f, 28.0f, 95.0f, 1.8f, -0.05f, 0.18f, 1.00f, -1.0f, -1.0f, 75.0f, 0.12f},
-        // Snare: body and crack without extreme top boost.
-        {{120, 220, 700, 4200, 11000}, {-0.8f, 0.8f, -0.5f, 1.2f, 0.4f}, {0.80f, 0.90f, 0.90f, 0.80f, 0.75f},
-         -17.0f, 3.2f, 12.0f, 110.0f, 1.6f, 0.08f, 0.18f, 1.08f, -1.0f, -1.0f, 90.0f, 0.15f},
-        // Percussion: transient detail and modest width.
-        {{160, 350, 1200, 6500, 14000}, {-0.5f, -0.5f, 0.3f, 0.8f, 0.5f}, {0.75f, 0.90f, 0.85f, 0.75f, 0.70f},
-         -20.0f, 2.4f, 8.0f, 85.0f, 0.8f, 0.12f, 0.10f, 1.12f, -1.0f, -1.0f, 85.0f, 0.10f},
-        // Hi-hat: high-pass cannot be configured in this five-bell EQ; conservative high-band shaping.
-        {{250, 700, 2500, 7500, 15000}, {-1.0f, -0.8f, 0.0f, 0.8f, -0.3f}, {0.75f, 0.85f, 0.85f, 0.75f, 0.70f},
-         -24.0f, 2.0f, 2.0f, 65.0f, 0.5f, -0.08f, 0.08f, 1.10f, -1.0f, -1.0f, 65.0f, 0.05f},
-        // 808: mono-safe low end and restrained drive.
-        {{35, 65, 140, 700, 4500}, {0.8f, 0.3f, -1.0f, 0.5f, -0.5f}, {0.70f, 0.85f, 0.95f, 0.90f, 0.75f},
-         -18.0f, 2.6f, 35.0f, 145.0f, 2.0f, -0.12f, 0.20f, 0.92f, -1.0f, -1.0f, 110.0f, 0.04f},
-        // EFX: conservative tonal and peak control for risers, sweeps and impacts.
-        {{120, 350, 1200, 5000, 12000}, {-1.0f, -0.5f, 0.0f, 0.5f, -0.5f}, {0.80f, 0.90f, 0.90f, 0.85f, 0.75f},
-         -20.0f, 2.0f, 8.0f, 100.0f, 0.6f, 0.0f, 0.08f, 1.10f, -2.0f, -1.5f, 100.0f, 0.08f},
-        // Melody: balanced harmonic content, gentle dynamics and modest width.
-        {{100, 280, 1400, 4800, 14000}, {-0.8f, -0.8f, 0.0f, 0.6f, 0.4f}, {0.75f, 0.90f, 0.85f, 0.80f, 0.70f},
-         -22.0f, 2.2f, 25.0f, 140.0f, 0.5f, 0.08f, 0.10f, 1.08f, -1.5f, -1.3f, 110.0f, 0.02f}
-    };
-
-    const auto& p = beat ? beatProfiles[category] : vocal[category];
     const float v = (float)variation / 9.0f;
-
     auto set = [this](const juce::String& key, float value)
     {
         if (auto* parameter = processor.state().getParameter(key))
             parameter->setValueNotifyingHost(parameter->convertTo0to1(value));
     };
 
-    // Each named preset is a variation of its instrument/voice-family base profile.
-    // Variation is deliberately restrained to avoid extreme, source-dependent settings.
-    const float eqVariation = (v - 0.5f) * (beat ? 0.65f : 0.55f);
-    for (int band = 0; band < 5; ++band)
+    float freq[5] { 55.0f, 140.0f, 650.0f, 3200.0f, 11000.0f };
+    float gain[5] { -2.0f, -1.0f, 0.0f, 1.0f, 1.5f };
+    float q[5] { 0.8f, 0.9f, 0.9f, 0.85f, 0.7f };
+    float threshold = -29.8f, ratio = 4.0f, attack = 5.0f, release = 60.0f;
+    float drive = 2.0f, tone = 0.0f, satMix = 0.25f, width = 1.0f;
+    float input = 11.0f, ceiling = -1.0f, limiterRelease = 100.0f, transient = 0.0f;
+    float panL = 0.0f, panR = 0.0f;
+
+    if (!beat)
     {
-        const float freqScale = 1.0f + (v - 0.5f) * (band == 0 ? -0.08f : band == 4 ? 0.10f : 0.04f);
-        const float bandVariation = (band == 0 ? -0.25f : band == 4 ? 0.25f : 0.10f) * eqVariation;
-        set("eqBandFreq" + juce::String(band), juce::jlimit(20.0f, 20000.0f, p.freq[band] * freqScale));
-        set("eqBandGain" + juce::String(band), juce::jlimit(-6.0f, 6.0f, p.gain[band] + bandVariation));
-        set("eqBandQ" + juce::String(band), p.q[band]);
-        set("eqBandDynamic" + juce::String(band), 0.0f);
+        // All vocal families follow the requested clean, forward vocal starting point.
+        const float familyTilt = (category == 1 ? 0.25f : category == 2 ? -0.15f : 0.0f);
+        freq[0] = category == 2 ? 75.0f : 90.0f;
+        freq[1] = 250.0f; freq[2] = 1200.0f; freq[3] = 4500.0f; freq[4] = 13500.0f;
+        gain[0] = -2.5f; gain[1] = -2.0f; gain[2] = 0.5f + familyTilt;
+        gain[3] = 2.0f; gain[4] = 1.5f;
+        threshold = -29.8f; ratio = 4.0f; attack = 5.0f; release = 60.0f;
+        drive = 2.0f; satMix = 0.25f; width = 1.0f;
+        input = 11.0f; ceiling = -1.0f; limiterRelease = 100.0f;
+    }
+    else
+    {
+        switch (category)
+        {
+            case 0: // Kick: sub and low foundation, remove unnecessary mids/highs.
+                freq[0]=48; freq[1]=95; freq[2]=280; freq[3]=3200; freq[4]=10500;
+                gain[0]=1.5f; gain[1]=0.8f; gain[2]=-3.0f; gain[3]=-4.0f; gain[4]=-5.0f;
+                width=1.0f; break;
+            case 1: // Snare: low-mid body through high crack.
+                freq[0]=90; freq[1]=220; freq[2]=850; freq[3]=4200; freq[4]=12000;
+                gain[0]=-4.0f; gain[1]=1.0f; gain[2]=1.2f; gain[3]=2.0f; gain[4]=1.0f;
+                width=0.40f; break;
+            case 2: // Percussion: mid/high focus, modest width, alternating pan.
+                freq[0]=180; freq[1]=450; freq[2]=1500; freq[3]=6000; freq[4]=14000;
+                gain[0]=-5.0f; gain[1]=-2.0f; gain[2]=0.8f; gain[3]=1.8f; gain[4]=1.0f;
+                width=0.10f; if (variation % 2 == 0) panL=-0.20f; else panR=0.20f; break;
+            case 3: // Closed hat.
+                freq[0]=250; freq[1]=800; freq[2]=2800; freq[3]=7500; freq[4]=15000;
+                gain[0]=-6.0f; gain[1]=-3.0f; gain[2]=0.5f; gain[3]=1.8f; gain[4]=1.0f;
+                width=0.10f; panL=-0.20f; break;
+            case 4: // Open hat.
+                freq[0]=300; freq[1]=1000; freq[2]=3500; freq[3]=8500; freq[4]=16000;
+                gain[0]=-6.0f; gain[1]=-3.0f; gain[2]=0.3f; gain[3]=1.5f; gain[4]=2.0f;
+                width=0.10f; panR=0.20f; break;
+            case 5: // EFX: broad mid/high detail, wide, alternating 40% pan.
+                freq[0]=160; freq[1]=420; freq[2]=1400; freq[3]=5500; freq[4]=13500;
+                gain[0]=-5.0f; gain[1]=-2.0f; gain[2]=0.6f; gain[3]=1.5f; gain[4]=1.2f;
+                width=1.0f; if (variation % 2 == 0) panL=-0.40f; else panR=0.40f; break;
+            case 6: // 808 / Bass: sub focus, mono centre, stronger saturation.
+                freq[0]=32; freq[1]=65; freq[2]=150; freq[3]=700; freq[4]=4200;
+                gain[0]=1.5f; gain[1]=1.0f; gain[2]=-2.5f; gain[3]=-4.0f; gain[4]=-5.0f;
+                width=1.0f; drive=8.0f; satMix=1.0f; break;
+            default: // Melody: mid/high focus, centre pan, controlled 30% width.
+                freq[0]=140; freq[1]=350; freq[2]=1400; freq[3]=4800; freq[4]=14000;
+                gain[0]=-5.0f; gain[1]=-2.0f; gain[2]=0.8f; gain[3]=1.8f; gain[4]=1.2f;
+                width=0.30f; drive=2.0f; satMix=1.0f; break;
+        }
     }
 
-    set("threshold", p.threshold + (v - 0.5f) * (beat ? 2.0f : 1.5f));
-    set("ratio", juce::jlimit(1.0f, 8.0f, p.ratio + (v - 0.5f) * 0.5f));
-    set("attack", p.attack * (0.90f + 0.20f * v));
-    set("release", p.release * (0.90f + 0.20f * v));
-    set("drive", juce::jlimit(0.0f, 4.0f, p.drive * (0.85f + 0.30f * v)));
-    set("tone", juce::jlimit(-1.0f, 1.0f, p.tone + (v - 0.5f) * 0.12f));
-    set("satMix", juce::jlimit(0.0f, 0.30f, p.satMix * (0.85f + 0.30f * v)));
-    set("width", juce::jlimit(0.0f, 1.35f, p.width + (v - 0.5f) * 0.08f));
-    set("inputGain", juce::jlimit(-3.0f, 0.0f, p.input + (0.5f - v) * 0.25f));
-    set("ceiling", juce::jlimit(-2.0f, -1.0f, p.ceiling));
-    set("limitRelease", p.limiterRelease);
-    set("transient", p.transient);
-
-    // Preserve compatibility parameters, but neutralize unused legacy pan/mono/Haas controls.
-    set("pan", 0.0f);
-    set("leftPan", 0.0f);
-    set("rightPan", 0.0f);
-    set("monoFreq", 120.0f);
-    set("haasMs", 0.0f);
+    // Small randomized preset-to-preset EQ and timing variation, bounded to keep
+    // the requested tonal direction and dynamics intact.
+    const float variationAmount = (v - 0.5f);
+    for (int band=0; band<5; ++band)
+    {
+        const float fScale = 1.0f + variationAmount * (band == 0 ? -0.06f : band == 4 ? 0.08f : 0.035f);
+        const float gOffset = variationAmount * (band < 2 ? 0.45f : 0.35f);
+        set("eqBandFreq"+juce::String(band), freq[band]*fScale);
+        set("eqBandGain"+juce::String(band), gain[band]+gOffset);
+        set("eqBandQ"+juce::String(band), q[band]);
+        set("eqBandDynamic"+juce::String(band), 0.0f);
+    }
+    const float presetVariation = variationAmount;
+    set("threshold", threshold + presetVariation * 0.35f);
+    set("ratio", ratio + presetVariation * 0.10f);
+    set("attack", attack * (1.0f + presetVariation * 0.04f));
+    set("release", release * (1.0f + presetVariation * 0.05f));
+    set("drive", drive + presetVariation * (drive >= 7.5f ? 0.30f : 0.12f));
+    set("tone", tone);
+    set("satMix", satMix >= 0.99f ? 1.0f : juce::jlimit(0.0f, 1.0f, satMix + presetVariation * 0.01f));
+    set("width", width); set("leftPan", panL); set("rightPan", panR);
+    set("inputGain", input); set("ceiling", ceiling);
+    set("limitRelease", limiterRelease); set("transient", transient);
+    set("utilityGain", 6.0f);
+    set("pan", 0.0f); set("monoFreq", 120.0f); set("haasMs", 0.0f);
 
     const auto& names = beat ? beatPresets : vocalPresets;
-    const auto presetName = names[safeId - 1];
-    status.setText(presetName + " LOADED — CLEAN STARTING MIX; CHECK LEVELS",
+    status.setText(names[safeId-1] + " LOADED — CHECK INPUT LEVEL & LIMITER REDUCTION",
                    juce::dontSendNotification);
 }
 
@@ -613,9 +622,20 @@ void HFXAudioProcessorEditor::paint(juce::Graphics& g)
     g.setColour(HFXColours::panel); g.fillRoundedRectangle(main.withTrimmedTop(90.0f), 12.0f);
     g.setColour(HFXColours::grid); g.drawRoundedRectangle(main.withTrimmedTop(90.0f), 12.0f, 1.0f);
 
-    const juce::String titles[] { "AUTO-EQ  /  FREQUENCY SHAPING", "COMPRESSOR  /  DYNAMIC CONTROL", "SATURATOR  /  HARMONIC COLOR", "PAN & WIDTH  /  STEREO FIELD", "LIMITER  /  PEAK CONTROL" };
+    const juce::String titles[] { "AUTO-EQ  /  FREQUENCY SHAPING", "COMPRESSOR  /  DYNAMIC CONTROL", "SATURATOR  /  HARMONIC COLOR", "PAN & WIDTH  /  STEREO FIELD", "LIMITER  /  PEAK CONTROL", "UTILITY  /  OUTPUT GAIN" };
     g.setColour(HFXColours::orange); g.setFont(juce::Font(12.0f, juce::Font::bold));
-    g.drawText(titles[activeTab], 32, 155, 600, 22, juce::Justification::left);
+    if (activeTab != 5) g.drawText(titles[activeTab], 32, 155, 600, 22, juce::Justification::left);
+    else
+    {
+        g.setFont(juce::Font(72.0f, juce::Font::bold));
+        g.setColour(HFXColours::orange.withAlpha(0.12f));
+        g.drawText("HFX", 0, 205, getWidth(), 110, juce::Justification::centred);
+        g.setColour(HFXColours::orange);
+        g.drawText("HFX", 0, 205, getWidth(), 110, juce::Justification::centred);
+        g.setFont(juce::Font(12.0f, juce::Font::bold));
+        g.setColour(HFXColours::muted);
+        g.drawText("OUTPUT LEVEL", 0, 275, getWidth(), 20, juce::Justification::centred);
+    }
 
     // Soft multi-pass text glow for the HFX / HF identity.
     g.setFont(juce::Font(42.0f, juce::Font::bold));
@@ -628,6 +648,7 @@ void HFXAudioProcessorEditor::paint(juce::Graphics& g)
     { g.setColour(HFXColours::orange.withAlpha(0.035f * (float)(13 - pass))); g.setFont(juce::Font(34.0f, juce::Font::bold)); g.drawText("HF", 28 - pass, getHeight() - 105 - pass, 62 + pass * 2, 48 + pass * 2, juce::Justification::centred); }
     g.setColour(HFXColours::orange); g.setFont(juce::Font(34.0f, juce::Font::bold)); g.drawText("HF", 28, getHeight() - 105, 62, 48, juce::Justification::centred);
 
+    if (activeTab == 5) return;
     const int mx = getWidth() - 76;
     g.setColour(HFXColours::panel2); g.fillRoundedRectangle((float)mx, 205.0f, 18.0f, 280.0f, 5.0f); g.fillRoundedRectangle((float)mx + 26.0f, 205.0f, 18.0f, 280.0f, 5.0f);
     const float left = juce::jlimit(0.0f, 1.0f, (processor.leftPeakDb() + 60.0f) / 60.0f);
@@ -644,12 +665,13 @@ void HFXAudioProcessorEditor::resized()
     presetBox.setBounds(getWidth() - 510, 58, 310, 32);
     autoMix.setBounds(getWidth() - 148, 18, 128, 36);
     const int tabY = 91, tabHeight = 38, tabGap = 5;
-    const int tabWidth = (getWidth() - 40 - tabGap * 4) / 5;
+    const int tabWidth = (getWidth() - 40 - tabGap * 5) / 6;
     for (int i = 0; i < panelModeCount; ++i)
         tabs[(size_t)i].setBounds(20 + i * (tabWidth + tabGap), tabY, tabWidth, tabHeight);
 
     const int graphHeight = 320;
     spectrumView.setBounds(30, 185, getWidth() - 130, graphHeight);
+    spectrumView.setVisible(activeTab != 5);
     const int graphBottom = 185 + graphHeight;
     const int utilityY = graphBottom + 8;
     bypass.setBounds(30, utilityY, 82, 22);
@@ -666,16 +688,18 @@ void HFXAudioProcessorEditor::resized()
     const int startX = 105;
     for (int i = 0; i < 10; ++i)
     {
-        const bool used = i < 4;
+        const bool used = i < (activeTab == 5 ? 1 : 4);
         if (!used)
         {
             knobLabels[(size_t)i].setBounds(0, 0, 0, 0);
             knobs[(size_t)i].setBounds(0, 0, 0, 0);
             continue;
         }
-        const int x = startX + i * cell;
-        const int y = graphBottom + 48;
-        knobLabels[(size_t)i].setBounds(x, y, cell - 8, 16);
-        knobs[(size_t)i].setBounds(x + (cell - 84) / 2, y + 14, 84, 84);
+        const int x = activeTab == 5 ? (getWidth() - 300) / 2 : startX + i * cell;
+        const int y = activeTab == 5 ? 305 : graphBottom + 48;
+        knobLabels[(size_t)i].setBounds(x, y, activeTab == 5 ? 300 : cell - 8, activeTab == 5 ? 24 : 16);
+        knobs[(size_t)i].setBounds(activeTab == 5 ? (getWidth() - 190) / 2 : x + (cell - 84) / 2,
+                                   y + (activeTab == 5 ? 30 : 14),
+                                   activeTab == 5 ? 190 : 84, activeTab == 5 ? 190 : 84);
     }
 }

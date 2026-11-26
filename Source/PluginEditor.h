@@ -34,7 +34,7 @@ private:
     juce::ComboBox trackMode, stemRole, presetBox;
     juce::TextButton autoMix { "AUTO-MIX" }, bypass { "BYPASS" };
     juce::TextButton eqSoloButton { "SOLO SELECTED BAND" };
-    std::array<juce::TextButton, 5> tabs;
+    std::array<juce::TextButton, 6> tabs;
     std::array<juce::Slider, 10> knobs;
     std::array<juce::Label, 10> knobLabels;
     std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>, 10> attachments;
@@ -47,19 +47,21 @@ private:
     int lastPresetMode = -1;
     int autoMixWaitTicks = 0;
 
-    const std::array<std::array<const char*, 4>, 5> ids {{
+    const std::array<std::array<const char*, 4>, 6> ids {{
         {{ "eqBandFreq0", "eqBandGain0", "eqBandQ0", "eqBandDynamic0" }},
         {{ "threshold", "ratio", "attack", "release" }},
         {{ "drive", "tone", "satMix", "satMix" }},
         {{ "width", "leftPan", "rightPan", "rightPan" }},
-        {{ "inputGain", "ceiling", "limitRelease", "transient" }}
+        {{ "inputGain", "ceiling", "limitRelease", "transient" }},
+        {{ "utilityGain", "utilityGain", "utilityGain", "utilityGain" }}
     }};
-    const std::array<std::array<const char*, 4>, 5> names {{
+    const std::array<std::array<const char*, 4>, 6> names {{
         {{ "FREQ", "GAIN", "Q", "DYNAMIC" }},
         {{ "THRESHOLD", "RATIO", "ATTACK", "RELEASE" }},
         {{ "DRIVE", "TONE", "MIX", "" }},
         {{ "WIDTH", "PAN L", "PAN R", "" }},
-        {{ "INPUT GAIN", "CEILING", "RELEASE", "TRANSIENT" }}
+        {{ "INPUT GAIN", "CEILING", "RELEASE", "TRANSIENT" }},
+        {{ "GAIN", "", "", "" }}
     }};
 
     void selectTab(int);

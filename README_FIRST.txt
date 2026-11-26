@@ -45,3 +45,14 @@ EQ. Always compare processed and bypassed audio, gain-match, and keep backups.
 GITHUB BUILD OPTION
 See GET_HFX_SETUP_EXE.txt for a click-by-click route to build the Windows installer
 on GitHub Actions without installing Visual Studio on your PC.
+
+
+HFX UPDATE NOTES - UTILITY + PRESET REVISION
+- Added a Utility tab with one centered output-gain knob (default 0.00 dB).
+- Utility gain is applied immediately before the peak limiter, so the limiter remains the final peak-protection stage.
+- Utility gain is saved/automated as a host parameter: utilityGain.
+- Vocal presets use the requested 4:1 compressor, 5 ms attack, 60 ms release, -29.8 dB threshold, 2 dB drive, 25% saturation mix, 100% width, +11 dB limiter input gain, -1 dB ceiling, and +6 dB Utility.
+- Beat preset categories: Kick, Snare, Percussion, Closed Hat, Open Hat, EFX, 808/Bass, Melody.
+- 808/Bass and Melody now have separate preset groups.
+- Presets use modest variations while keeping their requested instrument/voice tonal direction.
+- Presets are starting points. Source recording level, arrangement, phase, and playback level still require listening and adjustment.
