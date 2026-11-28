@@ -509,85 +509,114 @@ void HFXAudioProcessorEditor::applyPreset(int id)
             parameter->setValueNotifyingHost(parameter->convertTo0to1(value));
     };
 
-    float freq[5] { 55.0f, 140.0f, 650.0f, 3200.0f, 11000.0f };
-    float gain[5] { -2.0f, -1.0f, 0.0f, 1.0f, 1.5f };
-    float q[5] { 0.8f, 0.9f, 0.9f, 0.85f, 0.7f };
+    // EQ type IDs: 0=48dB HP, 1=12dB HP, 2=low shelf, 3=bell,
+    // 4=notch, 5=high shelf, 6=12dB LP, 7=48dB LP.
+    float freq[5] { 85.0f, 250.0f, 900.0f, 4200.0f, 14500.0f };
+    float gain[5] { 0.0f, -2.0f, -1.0f, 1.5f, 1.0f };
+    float q[5] { 0.707f, 1.0f, 1.1f, 0.9f, 0.707f };
+    int type[5] { 1, 3, 3, 3, 5 };
+
+    // Reference-guide dynamics starting point. Small bounded variation is
+    // applied below so all ten presets differ without leaving the same role.
     float threshold = -29.8f, ratio = 4.0f, attack = 5.0f, release = 60.0f;
     float drive = 2.0f, tone = 0.0f, satMix = 0.25f, width = 1.0f;
-    float input = 11.0f, ceiling = -1.0f, limiterRelease = 100.0f, transient = 0.0f;
+    float input = 3.0f, ceiling = -1.0f, limiterRelease = 300.0f, transient = 0.0f;
     float panL = 0.0f, panR = 0.0f;
 
     if (!beat)
     {
-        // All vocal families follow the requested clean, forward vocal starting point.
-        const float familyTilt = (category == 1 ? 0.25f : category == 2 ? -0.15f : 0.0f);
+        // Vocal guide: HPF, controlled low-mid, presence and air; smooth top shelf.
+        const float familyTilt = (category == 1 ? 0.35f : category == 2 ? -0.25f : category == 3 ? 0.15f : 0.0f);
         freq[0] = category == 2 ? 75.0f : 90.0f;
-        freq[1] = 250.0f; freq[2] = 1200.0f; freq[3] = 4500.0f; freq[4] = 13500.0f;
-        gain[0] = -2.5f; gain[1] = -2.0f; gain[2] = 0.5f + familyTilt;
-        gain[3] = 2.0f; gain[4] = 1.5f;
+        freq[1] = 260.0f; freq[2] = 1100.0f; freq[3] = 4300.0f; freq[4] = 13500.0f;
+        gain[0] = 0.0f; gain[1] = -2.2f; gain[2] = -0.5f + familyTilt;
+        gain[3] = 2.0f; gain[4] = 1.4f;
+        type[0] = 1; type[1] = 3; type[2] = 3; type[3] = 3; type[4] = 5;
+        q[1] = 1.0f; q[2] = 1.15f; q[3] = 0.85f;
         threshold = -29.8f; ratio = 4.0f; attack = 5.0f; release = 60.0f;
         drive = 2.0f; satMix = 0.25f; width = 1.0f;
-        input = 11.0f; ceiling = -1.0f; limiterRelease = 100.0f;
+        input = 3.0f; ceiling = -1.0f; limiterRelease = 300.0f;
     }
     else
     {
+        // Beat stems use a gentler bus-style control than the vocal chain.
+        threshold = -18.0f; ratio = 2.0f; attack = 10.0f; release = 100.0f;
         switch (category)
         {
-            case 0: // Kick: sub and low foundation, remove unnecessary mids/highs.
-                freq[0]=48; freq[1]=95; freq[2]=280; freq[3]=3200; freq[4]=10500;
-                gain[0]=1.5f; gain[1]=0.8f; gain[2]=-3.0f; gain[3]=-4.0f; gain[4]=-5.0f;
-                width=1.0f; break;
-            case 1: // Snare: low-mid body through high crack.
-                freq[0]=90; freq[1]=220; freq[2]=850; freq[3]=4200; freq[4]=12000;
-                gain[0]=-4.0f; gain[1]=1.0f; gain[2]=1.2f; gain[3]=2.0f; gain[4]=1.0f;
+            case 0: // Kick: retain sub/body, trim mud and excessive top.
+                freq[0]=28; freq[1]=85; freq[2]=260; freq[3]=3200; freq[4]=12500;
+                gain[0]=0; gain[1]=1.0f; gain[2]=-2.8f; gain[3]=-1.5f; gain[4]=0;
+                type[0]=1; type[1]=2; type[2]=3; type[3]=3; type[4]=6;
+                q[2]=1.15f; width=1.0f; break;
+            case 1: // Snare: low-mid body, crack and controlled top; 40% width.
+                freq[0]=85; freq[1]=220; freq[2]=850; freq[3]=4200; freq[4]=13500;
+                gain[0]=0; gain[1]=1.0f; gain[2]=0.5f; gain[3]=2.0f; gain[4]=1.0f;
+                type[0]=1; type[1]=3; type[2]=3; type[3]=3; type[4]=5;
                 width=0.40f; break;
-            case 2: // Percussion: mid/high focus, modest width, alternating pan.
-                freq[0]=180; freq[1]=450; freq[2]=1500; freq[3]=6000; freq[4]=14000;
-                gain[0]=-5.0f; gain[1]=-2.0f; gain[2]=0.8f; gain[3]=1.8f; gain[4]=1.0f;
+            case 2: // Percussion: mid/high detail, narrow stereo, alternating 20% pan.
+                freq[0]=150; freq[1]=420; freq[2]=1500; freq[3]=6200; freq[4]=15500;
+                gain[0]=0; gain[1]=-2.0f; gain[2]=0.5f; gain[3]=1.8f; gain[4]=1.0f;
+                type[0]=1; type[1]=3; type[2]=3; type[3]=3; type[4]=5;
                 width=0.10f; if (variation % 2 == 0) panL=-0.20f; else panR=0.20f; break;
-            case 3: // Closed hat.
-                freq[0]=250; freq[1]=800; freq[2]=2800; freq[3]=7500; freq[4]=15000;
-                gain[0]=-6.0f; gain[1]=-3.0f; gain[2]=0.5f; gain[3]=1.8f; gain[4]=1.0f;
+            case 3: // Closed hat: high-passed, clean tick; 20% left, 10% width.
+                freq[0]=420; freq[1]=1100; freq[2]=3800; freq[3]=8500; freq[4]=17000;
+                gain[0]=0; gain[1]=-1.5f; gain[2]=0.4f; gain[3]=1.5f; gain[4]=0.8f;
+                type[0]=1; type[1]=3; type[2]=3; type[3]=3; type[4]=5;
                 width=0.10f; panL=-0.20f; break;
-            case 4: // Open hat.
-                freq[0]=300; freq[1]=1000; freq[2]=3500; freq[3]=8500; freq[4]=16000;
-                gain[0]=-6.0f; gain[1]=-3.0f; gain[2]=0.3f; gain[3]=1.5f; gain[4]=2.0f;
+            case 4: // Open hat: brighter high band; 20% right, 10% width.
+                freq[0]=300; freq[1]=900; freq[2]=3200; freq[3]=7600; freq[4]=16500;
+                gain[0]=0; gain[1]=-1.5f; gain[2]=0.3f; gain[3]=1.4f; gain[4]=1.5f;
+                type[0]=1; type[1]=3; type[2]=3; type[3]=3; type[4]=5;
                 width=0.10f; panR=0.20f; break;
-            case 5: // EFX: broad mid/high detail, wide, alternating 40% pan.
-                freq[0]=160; freq[1]=420; freq[2]=1400; freq[3]=5500; freq[4]=13500;
-                gain[0]=-5.0f; gain[1]=-2.0f; gain[2]=0.6f; gain[3]=1.5f; gain[4]=1.2f;
+            case 5: // EFX: remove rumble, preserve transition detail, wide and alternate 40%.
+                freq[0]=120; freq[1]=380; freq[2]=1400; freq[3]=5600; freq[4]=16000;
+                gain[0]=0; gain[1]=-1.8f; gain[2]=0.6f; gain[3]=1.6f; gain[4]=1.0f;
+                type[0]=1; type[1]=3; type[2]=3; type[3]=3; type[4]=5;
                 width=1.0f; if (variation % 2 == 0) panL=-0.40f; else panR=0.40f; break;
-            case 6: // 808 / Bass: sub focus, mono centre, stronger saturation.
-                freq[0]=32; freq[1]=65; freq[2]=150; freq[3]=700; freq[4]=4200;
-                gain[0]=1.5f; gain[1]=1.0f; gain[2]=-2.5f; gain[3]=-4.0f; gain[4]=-5.0f;
+            case 6: // 808/Bass: mono sub, controlled harmonics, strong saturation.
+                freq[0]=24; freq[1]=58; freq[2]=160; freq[3]=650; freq[4]=5200;
+                gain[0]=0; gain[1]=1.2f; gain[2]=-1.8f; gain[3]=-1.5f; gain[4]=0;
+                type[0]=0; type[1]=2; type[2]=3; type[3]=3; type[4]=6;
                 width=1.0f; drive=8.0f; satMix=1.0f; break;
-            default: // Melody: mid/high focus, centre pan, controlled 30% width.
-                freq[0]=140; freq[1]=350; freq[2]=1400; freq[3]=4800; freq[4]=14000;
-                gain[0]=-5.0f; gain[1]=-2.0f; gain[2]=0.8f; gain[3]=1.8f; gain[4]=1.2f;
-                width=0.30f; drive=2.0f; satMix=1.0f; break;
+            default: // Melody: mid/high clarity, three guide-based stereo layouts.
+                freq[0]=110; freq[1]=320; freq[2]=1300; freq[3]=4700; freq[4]=15000;
+                gain[0]=0; gain[1]=-2.0f; gain[2]=0.6f; gain[3]=1.7f; gain[4]=1.1f;
+                type[0]=1; type[1]=3; type[2]=3; type[3]=3; type[4]=5;
+                drive=2.0f; satMix=1.0f;
+                if (variation % 3 == 0) { width=0.30f; }
+                else if (variation % 3 == 1) { width=0.45f; panL=-0.30f; panR=0.20f; }
+                else { width=0.55f; if (variation % 2 == 0) panL=-0.40f; else panR=0.40f; }
+                break;
         }
     }
 
-    // Small randomized preset-to-preset EQ and timing variation, bounded to keep
-    // the requested tonal direction and dynamics intact.
-    const float variationAmount = (v - 0.5f);
-    for (int band=0; band<5; ++band)
+    // Ten related but distinct voicings per role. Variation is intentionally
+    // modest: it changes cutoff, bell centers, Q and gain, not the role's intent.
+    const float centered = v - 0.5f;
+    for (int band = 0; band < 5; ++band)
     {
-        const float fScale = 1.0f + variationAmount * (band == 0 ? -0.06f : band == 4 ? 0.08f : 0.035f);
-        const float gOffset = variationAmount * (band < 2 ? 0.45f : 0.35f);
-        set("eqBandFreq"+juce::String(band), freq[band]*fScale);
-        set("eqBandGain"+juce::String(band), gain[band]+gOffset);
-        set("eqBandQ"+juce::String(band), q[band]);
-        set("eqBandDynamic"+juce::String(band), 0.0f);
+        const float freqSpread = (band == 0 ? 0.12f : band == 4 ? 0.10f : 0.08f);
+        const float fScale = std::pow(2.0f, centered * freqSpread);
+        const float gSpread = (band == 0 ? 0.0f : band == 4 ? 0.45f : 0.75f);
+        const float qScale = 1.0f + centered * (band == 2 ? 0.18f : 0.10f);
+        set("eqBandFreq" + juce::String(band), freq[band] * fScale);
+        set("eqBandGain" + juce::String(band), gain[band] + centered * gSpread);
+        set("eqBandQ" + juce::String(band), q[band] * qScale);
+        set("eqBandType" + juce::String(band), (float)type[band]);
+        set("eqBandDynamic" + juce::String(band), 0.0f);
     }
-    const float presetVariation = variationAmount;
-    set("threshold", threshold + presetVariation * 0.35f);
-    set("ratio", ratio + presetVariation * 0.10f);
-    set("attack", attack * (1.0f + presetVariation * 0.04f));
-    set("release", release * (1.0f + presetVariation * 0.05f));
-    set("drive", drive + presetVariation * (drive >= 7.5f ? 0.30f : 0.12f));
+
+    // Keep the requested compressor/limiter character while varying each preset
+    // slightly. Input gain is kept at +3 dB per the reference limiter chain;
+    // Utility adds +6 dB ahead of peak protection, not after the limiter.
+    const float presetVariation = centered;
+    set("threshold", threshold + presetVariation * 0.8f);
+    set("ratio", ratio + presetVariation * 0.20f);
+    set("attack", attack * (1.0f + presetVariation * 0.10f));
+    set("release", release * (1.0f + presetVariation * 0.12f));
+    set("drive", drive + presetVariation * (drive >= 7.5f ? 0.50f : 0.20f));
     set("tone", tone);
-    set("satMix", satMix >= 0.99f ? 1.0f : juce::jlimit(0.0f, 1.0f, satMix + presetVariation * 0.01f));
+    set("satMix", satMix);
     set("width", width); set("leftPan", panL); set("rightPan", panR);
     set("inputGain", input); set("ceiling", ceiling);
     set("limitRelease", limiterRelease); set("transient", transient);
@@ -595,7 +624,7 @@ void HFXAudioProcessorEditor::applyPreset(int id)
     set("pan", 0.0f); set("monoFreq", 120.0f); set("haasMs", 0.0f);
 
     const auto& names = beat ? beatPresets : vocalPresets;
-    status.setText(names[safeId-1] + " LOADED — CHECK INPUT LEVEL & LIMITER REDUCTION",
+    status.setText(names[safeId-1] + " LOADED — CHECK GAIN REDUCTION & SOURCE LEVEL",
                    juce::dontSendNotification);
 }
 

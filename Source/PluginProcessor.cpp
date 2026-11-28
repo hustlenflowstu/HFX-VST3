@@ -263,24 +263,32 @@ bool HFXAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 
 void HFXAudioProcessor::updateParameters()
 {
-    // Five fixed bell bands. The old filter-type parameters remain in the state tree
-    // only for compatibility with sessions created by earlier HFX builds.
+    // Five parametric bands with selectable filter shapes. Presets use the
+    // hidden legacy filter-type parameters for practical HP/LP/shelf shaping.
     for (int ch = 0; ch < 2; ++ch)
         for (int band = 0; band < 5; ++band)
         {
-            auto& filter = eq[(size_t)ch][(size_t)band][0];
+            const float freq = pEqBandFreq[(size_t)band]->load(std::memory_order_relaxed);
             const float q = pEqBandQ[(size_t)band] != nullptr
                 ? pEqBandQ[(size_t)band]->load(std::memory_order_relaxed) : 0.707f;
             const float baseGain = pEqBandGain[(size_t)band]->load(std::memory_order_relaxed);
             const float dynamicDb = pEqBandDynamic[(size_t)band] != nullptr
                 ? pEqBandDynamic[(size_t)band]->load(std::memory_order_relaxed) * eqDynamicDetector.load(std::memory_order_relaxed) : 0.0f;
-            filter.setPeak(sampleRateHz,
-                           pEqBandFreq[(size_t)band]->load(std::memory_order_relaxed),
-                           q,
-                           baseGain - dynamicDb);
-            for (int stage = 1; stage < 4; ++stage)
-                eq[(size_t)ch][(size_t)band][(size_t)stage].setPeak(sampleRateHz, 1000.0f, 0.707f, 0.0f);
+            const int type = pEqBandType[(size_t)band] != nullptr
+                ? juce::jlimit(0, 7, (int)std::round(pEqBandType[(size_t)band]->load(std::memory_order_relaxed))) : 3;
+
+            for (int stage = 0; stage < 4; ++stage)
+            {
+                auto& filter = eq[(size_t)ch][(size_t)band][(size_t)stage];
+                const bool fourPole = (type == 0 || type == 7);
+                const bool firstStageOnly = (type == 1 || type == 2 || type == 3 || type == 4 || type == 5 || type == 6);
+                if ((fourPole || stage == 0) && !(firstStageOnly && stage > 0))
+                    filter.setFilter(sampleRateHz, freq, q, baseGain - dynamicDb, type);
+                else
+                    filter.setPeak(sampleRateHz, 1000.0f, 0.707f, 0.0f);
+            }
         }
+
     const int soloBand = eqSoloBand.load(std::memory_order_relaxed);
     if (soloBand >= 0)
     {
