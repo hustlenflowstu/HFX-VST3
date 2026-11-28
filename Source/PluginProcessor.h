@@ -128,8 +128,6 @@ private:
     std::atomic<float>* pDrumDrive = nullptr;
     std::atomic<float>* pDrumDamp = nullptr;
     std::atomic<float>* pDrumBoom = nullptr;
-    std::atomic<float>* pDrumFreq = nullptr; // legacy session parameter; no longer exposed in UI
-    std::atomic<float>* pSidechainEnabled = nullptr;
     std::atomic<float>* pBypass = nullptr;
 
     std::atomic<float> leftPeak { -90.0f }, rightPeak { -90.0f }, outputRms { -90.0f };

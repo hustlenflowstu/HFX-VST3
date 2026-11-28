@@ -353,18 +353,6 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
     addAndMakeVisible(bypass);
     bypassAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.state(), "bypass", bypass);
 
-    sidechainButton.setClickingTogglesState(true);
-    sidechainButton.setColour(juce::TextButton::buttonOnColourId, HFXColours::orange);
-    sidechainButton.onClick = [this]
-    {
-        sidechainButton.setButtonText(sidechainButton.getToggleState() ? "SIDECHAIN ON" : "SIDECHAIN OFF");
-    };
-    addAndMakeVisible(sidechainButton);
-    sidechainButton.setVisible(false);
-    sidechainButton.setTooltip("Enable external sidechain detection. Select the source track in Ableton Live's Sidechain routing menu.");
-    sidechainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        processor.state(), "sidechainEnabled", sidechainButton);
-
     const juce::String tabNames[] { "EQ", "COMPRESSOR", "SATURATOR", "PAN & WIDTH", "LIMITER", "UTILITY", "DRUM BUS" };
     for (int i = 0; i < panelModeCount; ++i)
     {
@@ -474,7 +462,6 @@ void HFXAudioProcessorEditor::updateTabVisibility()
         tabs[(size_t)i].setToggleState(i == activeTab, juce::dontSendNotification);
     spectrumView.setVisible(activeTab != 5 && activeTab != 6);
     eqSoloButton.setVisible(activeTab == 0);
-    sidechainButton.setVisible(activeTab == 1 && !drumOnly);
     rebuildAttachments();
 }
 
@@ -507,7 +494,6 @@ void HFXAudioProcessorEditor::selectTab(int index)
     rightMeterText.setVisible(true);
     rmsText.setVisible(true);
     eqSoloButton.setVisible(activeTab == 0);
-    sidechainButton.setVisible(activeTab == 1 && !drumBusEligible());
     rebuildAttachments();
     resized();
     repaint();
@@ -518,7 +504,7 @@ void HFXAudioProcessorEditor::rebuildAttachments()
     for (auto& attachment : attachments) attachment.reset();
     for (int i = 0; i < 10; ++i)
     {
-        const int visibleCount = activeTab == 5 ? 1 : ((activeTab == 2 || activeTab == 3) ? 3 : 4);
+        const int visibleCount = activeTab == 5 ? 1 : (activeTab == 6 ? 3 : ((activeTab == 2 || activeTab == 3) ? 3 : 4));
         const bool used = i < visibleCount;
         knobLabels[(size_t)i].setVisible(used);
         knobs[(size_t)i].setVisible(used);
@@ -830,8 +816,6 @@ void HFXAudioProcessorEditor::resized()
     bypass.setBounds(30, utilityY, 82, 22);
     eqSoloButton.setBounds(120, utilityY, 142, 22);
     eqSoloButton.setVisible(activeTab == 0);
-    sidechainButton.setBounds(getWidth() - 190, 151, 158, 26);
-    sidechainButton.setVisible(activeTab == 1 && !drumBusEligible());
     status.setBounds(275, utilityY, juce::jmax(180, getWidth() - 565), 22);
     const int meterX = getWidth() - 282;
     leftMeterText.setBounds(meterX, utilityY, 252, 14);
@@ -843,7 +827,7 @@ void HFXAudioProcessorEditor::resized()
     const int startX = 105;
     for (int i = 0; i < 10; ++i)
     {
-        const bool used = i < (activeTab == 5 ? 1 : 4);
+        const bool used = i < (activeTab == 5 ? 1 : (activeTab == 6 ? 3 : 4));
         if (!used)
         {
             knobLabels[(size_t)i].setBounds(0, 0, 0, 0);

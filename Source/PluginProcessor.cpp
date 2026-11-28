@@ -114,7 +114,6 @@ float HFXAudioProcessor::Biquad::magnitudeAt(double sr, float frequencyHz) const
 HFXAudioProcessor::HFXAudioProcessor()
     : AudioProcessor(BusesProperties()
         .withInput("Input", juce::AudioChannelSet::stereo(), true)
-        .withInput("Sidechain", juce::AudioChannelSet::stereo(), false)
         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       apvts(*this, nullptr, "HFX_STATE", makeParameters())
 {
@@ -153,8 +152,6 @@ HFXAudioProcessor::HFXAudioProcessor()
     pDrumDrive = apvts.getRawParameterValue("drumDrive");
     pDrumDamp = apvts.getRawParameterValue("drumDamp");
     pDrumBoom = apvts.getRawParameterValue("drumBoom");
-    pDrumFreq = apvts.getRawParameterValue("drumFreq");
-    pSidechainEnabled = apvts.getRawParameterValue("sidechainEnabled");
     pBypass = apvts.getRawParameterValue("bypass");
 }
 
@@ -213,7 +210,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout HFXAudioProcessor::makeParam
     f("drumDrive", "Drum Bus Drive", { 0.0f, 20.0f, 0.1f }, 3.0f, "%");
     f("drumDamp", "Drum Bus Damp", { 1500.0f, 20000.0f, 10.0f, 0.35f }, 9200.0f, "Hz");
     f("drumBoom", "Drum Bus Boom", { 0.0f, 100.0f, 0.1f }, 0.0f, "%");
-    f("drumFreq", "Drum Bus Boom Frequency", { 30.0f, 120.0f, 0.1f }, 50.0f, "Hz");
     params.push_back(std::make_unique<AudioParameterChoice>(
         ParameterID { "trackMode", 1 }, "Track Mode",
         StringArray { "Vocal", "Beat" }, 0));
@@ -221,8 +217,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout HFXAudioProcessor::makeParam
         ParameterID { "stemRole", 1 }, "Beat Stem Role",
         StringArray { "Kick", "Snare", "Percussion", "Closed Hat", "Open Hat",
                       "EFX", "808 / Bass", "Melody" }, 0));
-    params.push_back(std::make_unique<AudioParameterBool>(
-        ParameterID { "sidechainEnabled", 1 }, "External Sidechain", false));
     params.push_back(std::make_unique<AudioParameterBool>(
         ParameterID { "bypass", 1 }, "Bypass", false));
     return { params.begin(), params.end() };
@@ -273,13 +267,8 @@ bool HFXAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 {
     const auto in = layouts.getMainInputChannelSet();
     const auto out = layouts.getMainOutputChannelSet();
-    const auto side = layouts.getChannelSet(true, 1);
-    const bool mainSupported = in == out
+    return in == out
         && (out == juce::AudioChannelSet::mono() || out == juce::AudioChannelSet::stereo());
-    const bool sideSupported = side.isDisabled()
-        || side == juce::AudioChannelSet::mono()
-        || side == juce::AudioChannelSet::stereo();
-    return mainSupported && sideSupported;
 }
 
 void HFXAudioProcessor::updateParameters()
@@ -327,15 +316,6 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
     const int channels = juce::jmin(2, buffer.getNumChannels());
     const int samples = buffer.getNumSamples();
     if (channels == 0 || samples == 0) return;
-
-    auto sidechainBuffer = getBusBuffer(buffer, true, 1);
-    const bool hasExternalSidechain = getBusCount(true) > 1
-        && getBus(true, 1)->isEnabled()
-        && sidechainBuffer.getNumChannels() > 0
-        && sidechainBuffer.getNumSamples() >= samples;
-    const bool useExternalSidechain = hasExternalSidechain
-        && pSidechainEnabled != nullptr
-        && pSidechainEnabled->load(std::memory_order_relaxed) > 0.5f;
 
     for (int c = getTotalNumInputChannels(); c < getTotalNumOutputChannels(); ++c)
         buffer.clear(c, 0, samples);
@@ -487,13 +467,6 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
             // saturation, Utility gain and peak limiting.
             float detectorPower = right != nullptr
                 ? 0.5f * (xL * xL + xR * xR) : xL * xL;
-            if (useExternalSidechain)
-            {
-                const int scChannels = sidechainBuffer.getNumChannels();
-                const float scL = sidechainBuffer.getReadPointer(0)[n];
-                const float scR = scChannels > 1 ? sidechainBuffer.getReadPointer(1)[n] : scL;
-                detectorPower = 0.5f * (scL * scL + scR * scR);
-            }
             const float compCoeff = detectorPower > compEnvelope[0] ? attackCoeff : releaseCoeff;
             compEnvelope[0] = compCoeff * compEnvelope[0] + (1.0f - compCoeff) * detectorPower;
             compEnvelope[1] = compEnvelope[0];
