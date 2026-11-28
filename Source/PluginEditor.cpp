@@ -80,6 +80,23 @@ void HFXSpectrumView::paint(juce::Graphics& g)
     for (int i = 1; i < 10; ++i)
         g.drawVerticalLine((int)(r.getX() + r.getWidth() * i / 10.0f), r.getY(), r.getBottom());
 
+    if (displayMode == 0)
+    {
+        g.setColour(HFXColours::muted.withAlpha(0.78f));
+        g.setFont(10.0f);
+        const char* freqLabels[] { "20", "50", "100", "500", "1k", "5k", "10k", "20k" };
+        const float freqValues[] { 20.0f, 50.0f, 100.0f, 500.0f, 1000.0f, 5000.0f, 10000.0f, 20000.0f };
+        for (int i = 0; i < 8; ++i)
+        {
+            const float t = std::log(freqValues[i] / 20.0f) / std::log(20000.0f / 20.0f);
+            const float x = r.getX() + r.getWidth() * t;
+            g.drawText(freqLabels[i], (int)x - 18, (int)r.getBottom() - 16, 36, 12, juce::Justification::centred);
+        }
+        g.drawText("+18", 4, (int)r.getY() + 2, 28, 12, juce::Justification::left);
+        g.drawText("0", 4, (int)r.getCentreY() - 6, 28, 12, juce::Justification::left);
+        g.drawText("-18", 4, (int)r.getBottom() - 18, 28, 12, juce::Justification::left);
+    }
+
     // Each processor gets its own visual language rather than reusing one spectrum graphic.
     if (displayMode == 0) // EQ: live spectrum + response curve
     {
@@ -304,15 +321,15 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
     trackMode.onChange = [this]
     {
         const bool beatMode = trackMode.getSelectedId() == 2;
-        stemRole.setVisible(activeTab != 5 && beatMode);
-        trackMode.setVisible(activeTab != 5);
-        presetBox.setVisible(activeTab != 5);
-        autoMix.setVisible(activeTab != 5);
-        bypass.setVisible(activeTab != 5);
-        status.setVisible(activeTab != 5);
-        leftMeterText.setVisible(activeTab != 5);
-        rightMeterText.setVisible(activeTab != 5);
-        rmsText.setVisible(activeTab != 5);
+        stemRole.setVisible(beatMode);
+        trackMode.setVisible(true);
+        presetBox.setVisible(true);
+        autoMix.setVisible(true);
+        bypass.setVisible(true);
+        status.setVisible(true);
+        leftMeterText.setVisible(true);
+        rightMeterText.setVisible(true);
+        rmsText.setVisible(true);
         refreshPresetChoices();
         resized();
     };
@@ -335,7 +352,7 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
     addAndMakeVisible(bypass);
     bypassAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.state(), "bypass", bypass);
 
-    const juce::String tabNames[] { "AUTO-EQ", "COMPRESSOR", "SATURATOR", "PAN & WIDTH", "LIMITER", "UTILITY" };
+    const juce::String tabNames[] { "EQ", "COMPRESSOR", "SATURATOR", "PAN & WIDTH", "LIMITER", "UTILITY" };
     for (int i = 0; i < panelModeCount; ++i)
     {
         tabs[(size_t)i].setButtonText(tabNames[i]);
@@ -429,15 +446,15 @@ void HFXAudioProcessorEditor::selectTab(int index)
         tabs[(size_t)i].setToggleState(i == activeTab, juce::dontSendNotification);
     spectrumView.setDisplayMode(activeTab);
     spectrumView.setVisible(activeTab != 5);
-    trackMode.setVisible(activeTab != 5);
-    stemRole.setVisible(activeTab != 5 && trackMode.getSelectedId() == 2);
-    presetBox.setVisible(activeTab != 5);
-    autoMix.setVisible(activeTab != 5);
-    bypass.setVisible(activeTab != 5);
-    status.setVisible(activeTab != 5);
-    leftMeterText.setVisible(activeTab != 5);
-    rightMeterText.setVisible(activeTab != 5);
-    rmsText.setVisible(activeTab != 5);
+    trackMode.setVisible(true);
+    stemRole.setVisible(trackMode.getSelectedId() == 2);
+    presetBox.setVisible(true);
+    autoMix.setVisible(true);
+    bypass.setVisible(true);
+    status.setVisible(true);
+    leftMeterText.setVisible(true);
+    rightMeterText.setVisible(true);
+    rmsText.setVisible(true);
     eqSoloButton.setVisible(activeTab == 0);
     rebuildAttachments();
     resized();
@@ -593,7 +610,7 @@ void HFXAudioProcessorEditor::timerCallback()
     spectrumView.repaint();
     leftMeterText.setText("L PEAK  " + juce::String(processor.leftPeakDb(), 1) + " dBFS", juce::dontSendNotification);
     rightMeterText.setText("R PEAK  " + juce::String(processor.rightPeakDb(), 1) + " dBFS", juce::dontSendNotification);
-    rmsText.setText("OUT RMS  " + juce::String(processor.outputRmsDb(), 1) + " dBFS", juce::dontSendNotification);
+    rmsText.setText("OUTPUT  " + juce::String(processor.outputRmsDb(), 1) + " dBFS", juce::dontSendNotification);
     if (autoMixWaitTicks > 0 && !processor.autoMixReady())
     {
         --autoMixWaitTicks;
@@ -622,20 +639,9 @@ void HFXAudioProcessorEditor::paint(juce::Graphics& g)
     g.setColour(HFXColours::panel); g.fillRoundedRectangle(main.withTrimmedTop(90.0f), 12.0f);
     g.setColour(HFXColours::grid); g.drawRoundedRectangle(main.withTrimmedTop(90.0f), 12.0f, 1.0f);
 
-    const juce::String titles[] { "AUTO-EQ  /  FREQUENCY SHAPING", "COMPRESSOR  /  DYNAMIC CONTROL", "SATURATOR  /  HARMONIC COLOR", "PAN & WIDTH  /  STEREO FIELD", "LIMITER  /  PEAK CONTROL", "UTILITY  /  OUTPUT GAIN" };
+    const juce::String titles[] { "EQ  /  PRECISION FREQUENCY SHAPING", "COMPRESSOR  /  DYNAMIC CONTROL", "SATURATOR  /  HARMONIC COLOR", "PAN & WIDTH  /  STEREO FIELD", "LIMITER  /  PEAK CONTROL", "UTILITY  /  OUTPUT GAIN" };
     g.setColour(HFXColours::orange); g.setFont(juce::Font(12.0f, juce::Font::bold));
-    if (activeTab != 5) g.drawText(titles[activeTab], 32, 155, 600, 22, juce::Justification::left);
-    else
-    {
-        g.setFont(juce::Font(72.0f, juce::Font::bold));
-        g.setColour(HFXColours::orange.withAlpha(0.12f));
-        g.drawText("HFX", 0, 205, getWidth(), 110, juce::Justification::centred);
-        g.setColour(HFXColours::orange);
-        g.drawText("HFX", 0, 205, getWidth(), 110, juce::Justification::centred);
-        g.setFont(juce::Font(12.0f, juce::Font::bold));
-        g.setColour(HFXColours::muted);
-        g.drawText("OUTPUT LEVEL", 0, 275, getWidth(), 20, juce::Justification::centred);
-    }
+    g.drawText(titles[activeTab], 32, 155, 600, 22, juce::Justification::left);
 
     // Soft multi-pass text glow for the HFX / HF identity.
     g.setFont(juce::Font(42.0f, juce::Font::bold));
@@ -648,7 +654,7 @@ void HFXAudioProcessorEditor::paint(juce::Graphics& g)
     { g.setColour(HFXColours::orange.withAlpha(0.035f * (float)(13 - pass))); g.setFont(juce::Font(34.0f, juce::Font::bold)); g.drawText("HF", 28 - pass, getHeight() - 105 - pass, 62 + pass * 2, 48 + pass * 2, juce::Justification::centred); }
     g.setColour(HFXColours::orange); g.setFont(juce::Font(34.0f, juce::Font::bold)); g.drawText("HF", 28, getHeight() - 105, 62, 48, juce::Justification::centred);
 
-    if (activeTab == 5) return;
+
     const int mx = getWidth() - 76;
     g.setColour(HFXColours::panel2); g.fillRoundedRectangle((float)mx, 205.0f, 18.0f, 280.0f, 5.0f); g.fillRoundedRectangle((float)mx + 26.0f, 205.0f, 18.0f, 280.0f, 5.0f);
     const float left = juce::jlimit(0.0f, 1.0f, (processor.leftPeakDb() + 60.0f) / 60.0f);
@@ -673,7 +679,7 @@ void HFXAudioProcessorEditor::resized()
     spectrumView.setBounds(30, 185, getWidth() - 130, graphHeight);
     spectrumView.setVisible(activeTab != 5);
     const int graphBottom = 185 + graphHeight;
-    const int utilityY = graphBottom + 8;
+    const int utilityY = activeTab == 5 ? getHeight() - 112 : graphBottom + 8;
     bypass.setBounds(30, utilityY, 82, 22);
     eqSoloButton.setBounds(120, utilityY, 142, 22);
     eqSoloButton.setVisible(activeTab == 0);
@@ -696,7 +702,7 @@ void HFXAudioProcessorEditor::resized()
             continue;
         }
         const int x = activeTab == 5 ? (getWidth() - 300) / 2 : startX + i * cell;
-        const int y = activeTab == 5 ? 305 : graphBottom + 48;
+        const int y = activeTab == 5 ? 280 : graphBottom + 48;
         knobLabels[(size_t)i].setBounds(x, y, activeTab == 5 ? 300 : cell - 8, activeTab == 5 ? 24 : 16);
         knobs[(size_t)i].setBounds(activeTab == 5 ? (getWidth() - 190) / 2 : x + (cell - 84) / 2,
                                    y + (activeTab == 5 ? 30 : 14),
