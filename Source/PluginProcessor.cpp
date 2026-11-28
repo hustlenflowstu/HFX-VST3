@@ -114,6 +114,7 @@ float HFXAudioProcessor::Biquad::magnitudeAt(double sr, float frequencyHz) const
 HFXAudioProcessor::HFXAudioProcessor()
     : AudioProcessor(BusesProperties()
         .withInput("Input", juce::AudioChannelSet::stereo(), true)
+        .withInput("Sidechain", juce::AudioChannelSet::stereo(), false)
         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       apvts(*this, nullptr, "HFX_STATE", makeParameters())
 {
@@ -153,6 +154,7 @@ HFXAudioProcessor::HFXAudioProcessor()
     pDrumDamp = apvts.getRawParameterValue("drumDamp");
     pDrumBoom = apvts.getRawParameterValue("drumBoom");
     pDrumFreq = apvts.getRawParameterValue("drumFreq");
+    pSidechainEnabled = apvts.getRawParameterValue("sidechainEnabled");
     pBypass = apvts.getRawParameterValue("bypass");
 }
 
@@ -220,6 +222,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout HFXAudioProcessor::makeParam
         StringArray { "Kick", "Snare", "Percussion", "Closed Hat", "Open Hat",
                       "EFX", "808 / Bass", "Melody" }, 0));
     params.push_back(std::make_unique<AudioParameterBool>(
+        ParameterID { "sidechainEnabled", 1 }, "External Sidechain", false));
+    params.push_back(std::make_unique<AudioParameterBool>(
         ParameterID { "bypass", 1 }, "Bypass", false));
     return { params.begin(), params.end() };
 }
@@ -269,7 +273,13 @@ bool HFXAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 {
     const auto in = layouts.getMainInputChannelSet();
     const auto out = layouts.getMainOutputChannelSet();
-    return in == out && (out == juce::AudioChannelSet::mono() || out == juce::AudioChannelSet::stereo());
+    const auto side = layouts.getChannelSet(true, 1);
+    const bool mainSupported = in == out
+        && (out == juce::AudioChannelSet::mono() || out == juce::AudioChannelSet::stereo());
+    const bool sideSupported = side.isDisabled()
+        || side == juce::AudioChannelSet::mono()
+        || side == juce::AudioChannelSet::stereo();
+    return mainSupported && sideSupported;
 }
 
 void HFXAudioProcessor::updateParameters()
@@ -317,6 +327,15 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
     const int channels = juce::jmin(2, buffer.getNumChannels());
     const int samples = buffer.getNumSamples();
     if (channels == 0 || samples == 0) return;
+
+    auto sidechainBuffer = getBusBuffer(buffer, true, 1);
+    const bool hasExternalSidechain = getBusCount(true) > 1
+        && getBus(true, 1)->isEnabled()
+        && sidechainBuffer.getNumChannels() > 0
+        && sidechainBuffer.getNumSamples() >= samples;
+    const bool useExternalSidechain = hasExternalSidechain
+        && pSidechainEnabled != nullptr
+        && pSidechainEnabled->load(std::memory_order_relaxed) > 0.5f;
 
     for (int c = getTotalNumInputChannels(); c < getTotalNumOutputChannels(); ++c)
         buffer.clear(c, 0, samples);
@@ -405,14 +424,16 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
 
     // Drum Bus mode is deliberately limited to the six percussive stem roles.
     // 808/Bass (role 6) and Melody (role 7) retain the full HFX dynamics chain.
-    const bool drumBusActive = pTrackMode->load(std::memory_order_relaxed) >= 0.5f
-        && pStemRole->load(std::memory_order_relaxed) < 5.5f;
+    const int currentStemRole = (int)std::round(pStemRole->load(std::memory_order_relaxed));
+    const bool beatMode = pTrackMode->load(std::memory_order_relaxed) >= 0.5f;
+    const bool drumBusActive = beatMode && currentStemRole < 6;
+    const bool bassOrMelodyMode = beatMode && (currentStemRole == 6 || currentStemRole == 7);
     if (drumBusActive)
     {
         const float dampHz = pDrumDamp != nullptr ? pDrumDamp->load(std::memory_order_relaxed) : 9200.0f;
         const float boomPct = pDrumBoom != nullptr ? pDrumBoom->load(std::memory_order_relaxed) : 0.0f;
         const float boomDb = boomPct * 0.10f;
-        const float boomHz = pDrumFreq != nullptr ? pDrumFreq->load(std::memory_order_relaxed) : 50.0f;
+        const float boomHz = 50.0f;
         for (int ch = 0; ch < 2; ++ch)
         {
             drumDampFilters[(size_t)ch].setFilter(sampleRateHz, dampHz, 0.707f, 0.0f, 6);
@@ -464,8 +485,15 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
         {
             // Full vocal / 808 / melody chain: linked compression, transient control,
             // saturation, Utility gain and peak limiting.
-            const float detectorPower = right != nullptr
+            float detectorPower = right != nullptr
                 ? 0.5f * (xL * xL + xR * xR) : xL * xL;
+            if (useExternalSidechain)
+            {
+                const int scChannels = sidechainBuffer.getNumChannels();
+                const float scL = sidechainBuffer.getReadPointer(0)[n];
+                const float scR = scChannels > 1 ? sidechainBuffer.getReadPointer(1)[n] : scL;
+                detectorPower = 0.5f * (scL * scL + scR * scR);
+            }
             const float compCoeff = detectorPower > compEnvelope[0] ? attackCoeff : releaseCoeff;
             compEnvelope[0] = compCoeff * compEnvelope[0] + (1.0f - compCoeff) * detectorPower;
             compEnvelope[1] = compEnvelope[0];
@@ -506,20 +534,23 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
             xL = saturate(xL, 0);
             if (right != nullptr) xR = saturate(xR, 1);
 
-            const float utilityGainDb = pUtilityGain != nullptr ? pUtilityGain->load(std::memory_order_relaxed) : 0.0f;
-            const float utilityLinear = juce::Decibels::decibelsToGain(utilityGainDb);
-            xL *= utilityLinear;
-            if (right != nullptr) xR *= utilityLinear;
+            if (!bassOrMelodyMode)
+            {
+                const float utilityGainDb = pUtilityGain != nullptr ? pUtilityGain->load(std::memory_order_relaxed) : 0.0f;
+                const float utilityLinear = juce::Decibels::decibelsToGain(utilityGainDb);
+                xL *= utilityLinear;
+                if (right != nullptr) xR *= utilityLinear;
 
-            const float peak = right != nullptr ? juce::jmax(std::abs(xL), std::abs(xR)) : std::abs(xL);
-            const float targetGain = peak > ceiling ? ceiling / juce::jmax(1.0e-9f, peak) : 1.0f;
-            if (targetGain < limiterGain[0]) limiterGain[0] = targetGain;
-            else limiterGain[0] = limiterReleaseCoeff * limiterGain[0] + (1.0f - limiterReleaseCoeff) * targetGain;
-            limiterGain[1] = limiterGain[0];
-            const float limitGR = -juce::Decibels::gainToDecibels(limiterGain[0], -90.0f);
-            maxLimitReduction = juce::jmax(maxLimitReduction, limitGR);
-            xL *= limiterGain[0];
-            if (right != nullptr) xR *= limiterGain[0];
+                const float peak = right != nullptr ? juce::jmax(std::abs(xL), std::abs(xR)) : std::abs(xL);
+                const float targetGain = peak > ceiling ? ceiling / juce::jmax(1.0e-9f, peak) : 1.0f;
+                if (targetGain < limiterGain[0]) limiterGain[0] = targetGain;
+                else limiterGain[0] = limiterReleaseCoeff * limiterGain[0] + (1.0f - limiterReleaseCoeff) * targetGain;
+                limiterGain[1] = limiterGain[0];
+                const float limitGR = -juce::Decibels::gainToDecibels(limiterGain[0], -90.0f);
+                maxLimitReduction = juce::jmax(maxLimitReduction, limitGR);
+                xL *= limiterGain[0];
+                if (right != nullptr) xR *= limiterGain[0];
+            }
         }
 
         if (right != nullptr)

@@ -34,6 +34,8 @@ private:
     juce::ComboBox trackMode, stemRole, presetBox;
     juce::TextButton autoMix { "AUTO-MIX" }, bypass { "BYPASS" };
     juce::TextButton eqSoloButton { "SOLO SELECTED BAND" };
+    juce::TextButton sidechainButton { "SIDECHAIN OFF" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> sidechainAttachment;
     std::array<juce::TextButton, 7> tabs;
     std::array<juce::Slider, 10> knobs;
     std::array<juce::Label, 10> knobLabels;
@@ -54,7 +56,7 @@ private:
         {{ "width", "leftPan", "rightPan", "rightPan" }},
         {{ "inputGain", "ceiling", "limitRelease", "transient" }},
         {{ "utilityGain", "utilityGain", "utilityGain", "utilityGain" }},
-        {{ "drumDrive", "drumDamp", "drumBoom", "drumFreq" }}
+        {{ "drumDrive", "drumDamp", "drumBoom", "drumBoom" }}
     }};
     const std::array<std::array<const char*, 4>, 7> names {{
         {{ "FREQ", "GAIN", "Q", "DYNAMIC" }},
@@ -63,7 +65,7 @@ private:
         {{ "WIDTH", "PAN L", "PAN R", "" }},
         {{ "INPUT GAIN", "CEILING", "RELEASE", "TRANSIENT" }},
         {{ "GAIN", "", "", "" }},
-        {{ "DRIVE", "DAMP", "BOOM", "FREQ" }}
+        {{ "DRIVE", "DAMP", "BOOM", "" }}
     }};
 
     void selectTab(int);

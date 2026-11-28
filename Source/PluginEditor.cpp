@@ -353,6 +353,18 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
     addAndMakeVisible(bypass);
     bypassAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.state(), "bypass", bypass);
 
+    sidechainButton.setClickingTogglesState(true);
+    sidechainButton.setColour(juce::TextButton::buttonOnColourId, HFXColours::orange);
+    sidechainButton.onClick = [this]
+    {
+        sidechainButton.setButtonText(sidechainButton.getToggleState() ? "SIDECHAIN ON" : "SIDECHAIN OFF");
+    };
+    addAndMakeVisible(sidechainButton);
+    sidechainButton.setVisible(false);
+    sidechainButton.setTooltip("Enable external sidechain detection. Select the source track in Ableton Live's Sidechain routing menu.");
+    sidechainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        processor.state(), "sidechainEnabled", sidechainButton);
+
     const juce::String tabNames[] { "EQ", "COMPRESSOR", "SATURATOR", "PAN & WIDTH", "LIMITER", "UTILITY", "DRUM BUS" };
     for (int i = 0; i < panelModeCount; ++i)
     {
@@ -444,12 +456,17 @@ bool HFXAudioProcessorEditor::drumBusEligible() const noexcept
 void HFXAudioProcessorEditor::updateTabVisibility()
 {
     const bool drumOnly = drumBusEligible();
+    const bool bassMelodyOnly = trackMode.getSelectedId() == 2
+        && (stemRole.getSelectedId() == 7 || stemRole.getSelectedId() == 8);
     for (int i = 0; i < panelModeCount; ++i)
     {
-        const bool visible = drumOnly ? (i == 0 || i == 3 || i == 6) : (i < 6);
+        const bool visible = drumOnly ? (i == 0 || i == 3 || i == 6)
+            : (bassMelodyOnly ? (i >= 0 && i <= 3) : (i < 6));
         tabs[(size_t)i].setVisible(visible);
     }
-    if (drumOnly && (activeTab == 1 || activeTab == 2 || activeTab == 4 || activeTab == 5))
+    if (drumOnly && activeTab != 0 && activeTab != 3 && activeTab != 6)
+        activeTab = 0;
+    if (bassMelodyOnly && activeTab > 3)
         activeTab = 0;
     if (!drumOnly && activeTab == 6)
         activeTab = 0;
@@ -457,14 +474,18 @@ void HFXAudioProcessorEditor::updateTabVisibility()
         tabs[(size_t)i].setToggleState(i == activeTab, juce::dontSendNotification);
     spectrumView.setVisible(activeTab != 5 && activeTab != 6);
     eqSoloButton.setVisible(activeTab == 0);
+    sidechainButton.setVisible(activeTab == 1 && !drumOnly);
     rebuildAttachments();
 }
 
 void HFXAudioProcessorEditor::selectTab(int index)
 {
-    const int maxTab = drumBusEligible() ? 6 : 5;
+    const bool drumOnly = drumBusEligible();
+    const bool bassMelodyOnly = trackMode.getSelectedId() == 2
+        && (stemRole.getSelectedId() == 7 || stemRole.getSelectedId() == 8);
+    const int maxTab = drumOnly ? 6 : (bassMelodyOnly ? 3 : 5);
     activeTab = juce::jlimit(0, maxTab, index);
-    if (drumBusEligible() && (activeTab == 1 || activeTab == 2 || activeTab == 4 || activeTab == 5))
+    if (drumOnly && activeTab != 0 && activeTab != 3 && activeTab != 6)
         activeTab = 0;
     if (activeTab != 0 && eqSoloButton.getToggleState())
     {
@@ -486,6 +507,7 @@ void HFXAudioProcessorEditor::selectTab(int index)
     rightMeterText.setVisible(true);
     rmsText.setVisible(true);
     eqSoloButton.setVisible(activeTab == 0);
+    sidechainButton.setVisible(activeTab == 1 && !drumBusEligible());
     rebuildAttachments();
     resized();
     repaint();
@@ -550,7 +572,7 @@ void HFXAudioProcessorEditor::applyPreset(int id)
     float input = 11.0f, ceiling = -1.0f, limiterRelease = 300.0f, transient = 0.0f;
     float panL = 0.0f, panR = 0.0f;
     float utility = 6.0f;
-    float drumDrive = 3.0f, drumDamp = 9200.0f, drumBoom = 0.0f, drumFreq = 50.0f;
+    float drumDrive = 3.0f, drumDamp = 9200.0f, drumBoom = 0.0f;
 
     if (!beat)
     {
@@ -662,7 +684,7 @@ void HFXAudioProcessorEditor::applyPreset(int id)
         drumDrive = driveValues[category][variation];
         drumDamp = dampValues[category][variation];
         drumBoom = boomValues[category][variation];
-        drumFreq = boomFreqValues[category][variation];
+
     }
     else
     {
@@ -716,7 +738,7 @@ void HFXAudioProcessorEditor::applyPreset(int id)
     set("limitRelease", limiterRelease); set("transient", transient);
     set("utilityGain", utility);
     set("drumDrive", drumDrive); set("drumDamp", drumDamp);
-    set("drumBoom", drumBoom); set("drumFreq", drumFreq);
+    set("drumBoom", drumBoom);
     set("pan", 0.0f); set("monoFreq", 120.0f); set("haasMs", 0.0f);
 
     const auto& names = beat ? beatPresets : vocalPresets;
@@ -764,7 +786,7 @@ void HFXAudioProcessorEditor::paint(juce::Graphics& g)
     g.setColour(HFXColours::panel); g.fillRoundedRectangle(main.withTrimmedTop(90.0f), 12.0f);
     g.setColour(HFXColours::grid); g.drawRoundedRectangle(main.withTrimmedTop(90.0f), 12.0f, 1.0f);
 
-    const juce::String titles[] { "EQ  /  PRECISION FREQUENCY SHAPING", "COMPRESSOR  /  DYNAMIC CONTROL", "SATURATOR  /  HARMONIC COLOR", "PAN & WIDTH  /  STEREO FIELD", "LIMITER  /  PEAK CONTROL", "UTILITY  /  OUTPUT GAIN", "DRUM BUS  /  DRIVE, DAMP & LOW-END BOOM" };
+    const juce::String titles[] { "EQ  /  PRECISION FREQUENCY SHAPING", "COMPRESSOR  /  DYNAMIC CONTROL", "SATURATOR  /  HARMONIC COLOR", "PAN & WIDTH  /  STEREO FIELD", "LIMITER  /  PEAK CONTROL", "UTILITY  /  OUTPUT GAIN", "DRUM BUS  /  DRIVE, DAMP & BOOM" };
     g.setColour(HFXColours::orange); g.setFont(juce::Font(12.0f, juce::Font::bold));
     g.drawText(titles[activeTab], 32, 155, 760, 22, juce::Justification::left);
 
@@ -808,6 +830,8 @@ void HFXAudioProcessorEditor::resized()
     bypass.setBounds(30, utilityY, 82, 22);
     eqSoloButton.setBounds(120, utilityY, 142, 22);
     eqSoloButton.setVisible(activeTab == 0);
+    sidechainButton.setBounds(getWidth() - 190, 151, 158, 26);
+    sidechainButton.setVisible(activeTab == 1 && !drumBusEligible());
     status.setBounds(275, utilityY, juce::jmax(180, getWidth() - 565), 22);
     const int meterX = getWidth() - 282;
     leftMeterText.setBounds(meterX, utilityY, 252, 14);
