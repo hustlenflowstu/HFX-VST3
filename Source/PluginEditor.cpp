@@ -2,7 +2,7 @@
 
 namespace
 {
-    constexpr int panelModeCount = 6;
+    constexpr int panelModeCount = 7;
     const juce::StringArray vocalPresets = []
     {
         juce::StringArray a;
@@ -316,7 +316,7 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
     stemRole.addItem("MELODY", 8);
     addAndMakeVisible(stemRole);
     stemRoleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(processor.state(), "stemRole", stemRole);
-    stemRole.onChange = [this] { refreshPresetChoices(); };
+    stemRole.onChange = [this] { refreshPresetChoices(); updateTabVisibility(); };
     stemRole.setVisible(trackMode.getSelectedId() == 2);
     trackMode.onChange = [this]
     {
@@ -331,6 +331,7 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
         rightMeterText.setVisible(true);
         rmsText.setVisible(true);
         refreshPresetChoices();
+        updateTabVisibility();
         resized();
     };
     refreshPresetChoices();
@@ -352,7 +353,7 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
     addAndMakeVisible(bypass);
     bypassAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(processor.state(), "bypass", bypass);
 
-    const juce::String tabNames[] { "EQ", "COMPRESSOR", "SATURATOR", "PAN & WIDTH", "LIMITER", "UTILITY" };
+    const juce::String tabNames[] { "EQ", "COMPRESSOR", "SATURATOR", "PAN & WIDTH", "LIMITER", "UTILITY", "DRUM BUS" };
     for (int i = 0; i < panelModeCount; ++i)
     {
         tabs[(size_t)i].setButtonText(tabNames[i]);
@@ -401,6 +402,7 @@ HFXAudioProcessorEditor::HFXAudioProcessorEditor(HFXAudioProcessor& p)
     }
     addAndMakeVisible(leftMeterText); addAndMakeVisible(rightMeterText); addAndMakeVisible(rmsText);
     rebuildAttachments();
+    updateTabVisibility();
     startTimerHz(30);
 }
 
@@ -433,9 +435,37 @@ void HFXAudioProcessorEditor::refreshPresetChoices()
     presetBox.onChange = [this] { if (presetBox.getSelectedId() > 0) applyPreset(presetBox.getSelectedId()); };
 }
 
+bool HFXAudioProcessorEditor::drumBusEligible() const noexcept
+{
+    return trackMode.getSelectedId() == 2 && stemRole.getSelectedId() >= 1
+        && stemRole.getSelectedId() <= 6;
+}
+
+void HFXAudioProcessorEditor::updateTabVisibility()
+{
+    const bool drumOnly = drumBusEligible();
+    for (int i = 0; i < panelModeCount; ++i)
+    {
+        const bool visible = drumOnly ? (i == 0 || i == 3 || i == 6) : (i < 6);
+        tabs[(size_t)i].setVisible(visible);
+    }
+    if (drumOnly && (activeTab == 1 || activeTab == 2 || activeTab == 4 || activeTab == 5))
+        activeTab = 0;
+    if (!drumOnly && activeTab == 6)
+        activeTab = 0;
+    for (int i = 0; i < panelModeCount; ++i)
+        tabs[(size_t)i].setToggleState(i == activeTab, juce::dontSendNotification);
+    spectrumView.setVisible(activeTab != 5 && activeTab != 6);
+    eqSoloButton.setVisible(activeTab == 0);
+    rebuildAttachments();
+}
+
 void HFXAudioProcessorEditor::selectTab(int index)
 {
-    activeTab = juce::jlimit(0, 5, index);
+    const int maxTab = drumBusEligible() ? 6 : 5;
+    activeTab = juce::jlimit(0, maxTab, index);
+    if (drumBusEligible() && (activeTab == 1 || activeTab == 2 || activeTab == 4 || activeTab == 5))
+        activeTab = 0;
     if (activeTab != 0 && eqSoloButton.getToggleState())
     {
         eqSoloButton.setToggleState(false, juce::dontSendNotification);
@@ -445,7 +475,7 @@ void HFXAudioProcessorEditor::selectTab(int index)
     for (int i = 0; i < panelModeCount; ++i)
         tabs[(size_t)i].setToggleState(i == activeTab, juce::dontSendNotification);
     spectrumView.setDisplayMode(activeTab);
-    spectrumView.setVisible(activeTab != 5);
+    spectrumView.setVisible(activeTab != 5 && activeTab != 6);
     trackMode.setVisible(true);
     stemRole.setVisible(trackMode.getSelectedId() == 2);
     presetBox.setVisible(true);
@@ -503,128 +533,194 @@ void HFXAudioProcessorEditor::applyPreset(int id)
     const int category = (safeId - 1) / 10;
     const int variation = (safeId - 1) % 10;
     const float v = (float)variation / 9.0f;
+    const float centered = v - 0.5f;
     auto set = [this](const juce::String& key, float value)
     {
         if (auto* parameter = processor.state().getParameter(key))
             parameter->setValueNotifyingHost(parameter->convertTo0to1(value));
     };
 
-    // EQ type IDs: 0=48dB HP, 1=12dB HP, 2=low shelf, 3=bell,
-    // 4=notch, 5=high shelf, 6=12dB LP, 7=48dB LP.
-    float freq[5] { 85.0f, 250.0f, 900.0f, 4200.0f, 14500.0f };
-    float gain[5] { 0.0f, -2.0f, -1.0f, 1.5f, 1.0f };
-    float q[5] { 0.707f, 1.0f, 1.1f, 0.9f, 0.707f };
+    float freq[5] { 90.0f, 260.0f, 1100.0f, 4300.0f, 13500.0f };
+    float gain[5] { 0.0f, -2.0f, -0.5f, 2.0f, 1.4f };
+    float q[5] { 0.707f, 1.0f, 1.15f, 0.85f, 0.707f };
     int type[5] { 1, 3, 3, 3, 5 };
 
-    // Reference-guide dynamics starting point. Small bounded variation is
-    // applied below so all ten presets differ without leaving the same role.
     float threshold = -29.8f, ratio = 4.0f, attack = 5.0f, release = 60.0f;
     float drive = 2.0f, tone = 0.0f, satMix = 0.25f, width = 1.0f;
-    float input = 3.0f, ceiling = -1.0f, limiterRelease = 300.0f, transient = 0.0f;
+    float input = 11.0f, ceiling = -1.0f, limiterRelease = 300.0f, transient = 0.0f;
     float panL = 0.0f, panR = 0.0f;
+    float utility = 6.0f;
+    float drumDrive = 3.0f, drumDamp = 9200.0f, drumBoom = 0.0f, drumFreq = 50.0f;
 
     if (!beat)
     {
-        // Vocal guide: HPF, controlled low-mid, presence and air; smooth top shelf.
-        const float familyTilt = (category == 1 ? 0.35f : category == 2 ? -0.25f : category == 3 ? 0.15f : 0.0f);
+        // Vocal guide: controlled low end and low-mid, forward presence and a restrained air shelf.
+        const float familyTilt = (category == 1 ? 0.6f : category == 2 ? -0.6f : category == 3 ? 0.3f : 0.0f);
         freq[0] = category == 2 ? 75.0f : 90.0f;
         freq[1] = 260.0f; freq[2] = 1100.0f; freq[3] = 4300.0f; freq[4] = 13500.0f;
         gain[0] = 0.0f; gain[1] = -2.2f; gain[2] = -0.5f + familyTilt;
         gain[3] = 2.0f; gain[4] = 1.4f;
         type[0] = 1; type[1] = 3; type[2] = 3; type[3] = 3; type[4] = 5;
-        q[1] = 1.0f; q[2] = 1.15f; q[3] = 0.85f;
         threshold = -29.8f; ratio = 4.0f; attack = 5.0f; release = 60.0f;
         drive = 2.0f; satMix = 0.25f; width = 1.0f;
-        input = 3.0f; ceiling = -1.0f; limiterRelease = 300.0f;
+        input = 11.0f; ceiling = -1.0f; limiterRelease = 300.0f; utility = 6.0f;
+    }
+    else if (category <= 5)
+    {
+        // Percussive stems use EQ + Pan/Width + Drum Bus only. The audio engine
+        // bypasses Compressor, Saturator, Utility and Limiter for these six roles.
+        threshold = 0.0f; ratio = 1.0f; attack = 10.0f; release = 100.0f;
+        drive = 0.0f; satMix = 0.0f; input = 0.0f; utility = 0.0f;
+        ceiling = 0.0f; limiterRelease = 80.0f;
+
+        switch (category)
+        {
+            case 0: // Kick: sub weight, focused punch, remove unnecessary upper range.
+                freq[0]=25; freq[1]=75; freq[2]=260; freq[3]=3500; freq[4]=12500;
+                gain[0]=0; gain[1]=1.8f; gain[2]=-3.2f; gain[3]=1.2f; gain[4]=-1.0f;
+                type[0]=0; type[1]=2; type[2]=3; type[3]=3; type[4]=6;
+                q[2]=1.25f; width=1.0f;
+                break;
+            case 1: // Snare: body, box control and crack; guide width 40%.
+                freq[0]=206; freq[1]=300; freq[2]=850; freq[3]=4200; freq[4]=14500;
+                gain[0]=0; gain[1]=1.8f; gain[2]=-2.4f; gain[3]=2.4f; gain[4]=0.8f;
+                type[0]=1; type[1]=3; type[2]=3; type[3]=3; type[4]=5;
+                width=0.40f;
+                break;
+            case 2: // Percussion: remove lows, retain transient detail; alternating L/R.
+                freq[0]=417; freq[1]=700; freq[2]=2200; freq[3]=6200; freq[4]=15500;
+                gain[0]=0; gain[1]=-2.8f; gain[2]=0.8f; gain[3]=2.0f; gain[4]=1.0f;
+                type[0]=1; type[1]=3; type[2]=3; type[3]=3; type[4]=5;
+                width=0.10f; if (variation % 2 == 0) panL=-0.20f; else panR=0.20f;
+                break;
+            case 3: // Closed hat: high-pass and high detail; 20% left, 10% width.
+                freq[0]=300; freq[1]=1500; freq[2]=4300; freq[3]=9000; freq[4]=17500;
+                gain[0]=0; gain[1]=-1.8f; gain[2]=0.5f; gain[3]=2.2f; gain[4]=1.0f;
+                type[0]=0; type[1]=3; type[2]=3; type[3]=3; type[4]=5;
+                width=0.10f; panL=-0.20f;
+                break;
+            case 4: // Open hat: brighter top and controlled body; 20% right, 10% width.
+                freq[0]=979; freq[1]=1800; freq[2]=4200; freq[3]=8500; freq[4]=16500;
+                gain[0]=0; gain[1]=-1.5f; gain[2]=0.4f; gain[3]=1.8f; gain[4]=2.0f;
+                type[0]=0; type[1]=3; type[2]=3; type[3]=3; type[4]=5;
+                width=0.10f; panR=0.20f;
+                break;
+            default: // EFX: remove rumble, shape mid/high transition detail, wide alternating pan.
+                freq[0]=140; freq[1]=420; freq[2]=1500; freq[3]=5800; freq[4]=16500;
+                gain[0]=0; gain[1]=-2.2f; gain[2]=0.7f; gain[3]=2.0f; gain[4]=1.3f;
+                type[0]=1; type[1]=3; type[2]=3; type[3]=3; type[4]=5;
+                width=1.0f; if (variation % 2 == 0) panL=-0.40f; else panR=0.40f;
+                break;
+        }
+
+        // Ten deliberately audible voicings per drum role: wider frequency,
+        // EQ gain, Q and Drum Bus variation than the earlier micro-adjustments.
+        const float freqScale[10] { 0.72f, 0.80f, 0.88f, 0.94f, 1.0f, 1.07f, 1.15f, 1.25f, 1.38f, 1.52f };
+        const float gainShift[10] { -2.4f, -1.8f, -1.2f, -0.6f, 0.0f, 0.6f, 1.2f, 1.8f, 2.4f, 3.0f };
+        const float driveValues[6][10] {
+            { 5, 3, 7, 9, 2, 11, 6, 13, 4, 8 },       // Kick
+            { 3, 5, 7, 2, 9, 4, 11, 6, 13, 8 },       // Snare
+            { 3, 4, 6, 2, 8, 5, 10, 7, 12, 1 },       // Percussion
+            { 2, 3, 4, 1, 5, 2, 6, 3, 8, 1 },         // Closed hat
+            { 3, 4, 5, 2, 6, 3, 8, 4, 10, 1 },       // Open hat
+            { 3, 5, 7, 2, 9, 4, 11, 6, 13, 8 }        // EFX
+        };
+        const float dampValues[6][10] {
+            { 7180, 6000, 8500, 10000, 5000, 12000, 9200, 4000, 15000, 7800 },
+            { 9200, 11000, 7500, 14000, 6000, 10000, 5000, 16000, 8200, 12500 },
+            { 9200, 12000, 7000, 15000, 5500, 10000, 6500, 18000, 8000, 13000 },
+            { 9200, 12000, 7500, 15000, 6000, 10500, 5000, 17000, 8000, 13000 },
+            { 9200, 13000, 7500, 16000, 6000, 11000, 5000, 18000, 8500, 14000 },
+            { 9200, 12000, 7000, 15000, 5500, 10000, 6500, 18000, 8000, 13000 }
+        };
+        const float boomValues[6][10] {
+            { 10, 0, 15, 5, 20, 8, 12, 3, 25, 10 },
+            { 0, 5, 0, 8, 0, 12, 3, 0, 15, 5 },
+            { 0, 3, 0, 5, 0, 8, 2, 0, 10, 4 },
+            { 0, 0, 2, 0, 4, 0, 1, 0, 5, 0 },
+            { 0, 2, 0, 4, 0, 6, 1, 0, 8, 0 },
+            { 0, 5, 0, 8, 0, 12, 3, 0, 15, 5 }
+        };
+        const float boomFreqValues[6][10] {
+            { 50, 45, 55, 60, 40, 70, 80, 35, 90, 65 },
+            { 50, 55, 45, 60, 40, 70, 80, 35, 90, 65 },
+            { 50, 55, 45, 60, 40, 70, 80, 35, 90, 65 },
+            { 50, 55, 45, 60, 40, 70, 80, 35, 90, 65 },
+            { 50, 55, 45, 60, 40, 70, 80, 35, 90, 65 },
+            { 50, 55, 45, 60, 40, 70, 80, 35, 90, 65 }
+        };
+        for (int band = 0; band < 5; ++band)
+        {
+            const float bandScale = band == 0 ? freqScale[variation] : std::pow(freqScale[variation], band == 4 ? 0.65f : 0.85f);
+            freq[band] *= bandScale;
+            if (band >= 1 && band <= 3)
+                gain[band] += gainShift[variation] * (band == 2 ? -0.75f : 0.75f);
+            else if (band == 4)
+                gain[band] += gainShift[variation] * 0.45f;
+            q[band] *= (variation % 2 == 0 ? 0.82f : 1.22f);
+        }
+        drumDrive = driveValues[category][variation];
+        drumDamp = dampValues[category][variation];
+        drumBoom = boomValues[category][variation];
+        drumFreq = boomFreqValues[category][variation];
     }
     else
     {
-        // Beat stems use a gentler bus-style control than the vocal chain.
-        threshold = -18.0f; ratio = 2.0f; attack = 10.0f; release = 100.0f;
-        switch (category)
+        // 808/Bass and Melody retain the full dynamics, saturation and output chain.
+        threshold = -29.8f; ratio = 4.0f; attack = 5.0f; release = 60.0f;
+        input = 11.0f; ceiling = -1.0f; limiterRelease = 300.0f; utility = 6.0f;
+        if (category == 6) // 808 / Bass
         {
-            case 0: // Kick: retain sub/body, trim mud and excessive top.
-                freq[0]=28; freq[1]=85; freq[2]=260; freq[3]=3200; freq[4]=12500;
-                gain[0]=0; gain[1]=1.0f; gain[2]=-2.8f; gain[3]=-1.5f; gain[4]=0;
-                type[0]=1; type[1]=2; type[2]=3; type[3]=3; type[4]=6;
-                q[2]=1.15f; width=1.0f; break;
-            case 1: // Snare: low-mid body, crack and controlled top; 40% width.
-                freq[0]=85; freq[1]=220; freq[2]=850; freq[3]=4200; freq[4]=13500;
-                gain[0]=0; gain[1]=1.0f; gain[2]=0.5f; gain[3]=2.0f; gain[4]=1.0f;
-                type[0]=1; type[1]=3; type[2]=3; type[3]=3; type[4]=5;
-                width=0.40f; break;
-            case 2: // Percussion: mid/high detail, narrow stereo, alternating 20% pan.
-                freq[0]=150; freq[1]=420; freq[2]=1500; freq[3]=6200; freq[4]=15500;
-                gain[0]=0; gain[1]=-2.0f; gain[2]=0.5f; gain[3]=1.8f; gain[4]=1.0f;
-                type[0]=1; type[1]=3; type[2]=3; type[3]=3; type[4]=5;
-                width=0.10f; if (variation % 2 == 0) panL=-0.20f; else panR=0.20f; break;
-            case 3: // Closed hat: high-passed, clean tick; 20% left, 10% width.
-                freq[0]=420; freq[1]=1100; freq[2]=3800; freq[3]=8500; freq[4]=17000;
-                gain[0]=0; gain[1]=-1.5f; gain[2]=0.4f; gain[3]=1.5f; gain[4]=0.8f;
-                type[0]=1; type[1]=3; type[2]=3; type[3]=3; type[4]=5;
-                width=0.10f; panL=-0.20f; break;
-            case 4: // Open hat: brighter high band; 20% right, 10% width.
-                freq[0]=300; freq[1]=900; freq[2]=3200; freq[3]=7600; freq[4]=16500;
-                gain[0]=0; gain[1]=-1.5f; gain[2]=0.3f; gain[3]=1.4f; gain[4]=1.5f;
-                type[0]=1; type[1]=3; type[2]=3; type[3]=3; type[4]=5;
-                width=0.10f; panR=0.20f; break;
-            case 5: // EFX: remove rumble, preserve transition detail, wide and alternate 40%.
-                freq[0]=120; freq[1]=380; freq[2]=1400; freq[3]=5600; freq[4]=16000;
-                gain[0]=0; gain[1]=-1.8f; gain[2]=0.6f; gain[3]=1.6f; gain[4]=1.0f;
-                type[0]=1; type[1]=3; type[2]=3; type[3]=3; type[4]=5;
-                width=1.0f; if (variation % 2 == 0) panL=-0.40f; else panR=0.40f; break;
-            case 6: // 808/Bass: mono sub, controlled harmonics, strong saturation.
-                freq[0]=24; freq[1]=58; freq[2]=160; freq[3]=650; freq[4]=5200;
-                gain[0]=0; gain[1]=1.2f; gain[2]=-1.8f; gain[3]=-1.5f; gain[4]=0;
-                type[0]=0; type[1]=2; type[2]=3; type[3]=3; type[4]=6;
-                width=1.0f; drive=8.0f; satMix=1.0f; break;
-            default: // Melody: mid/high clarity, three guide-based stereo layouts.
-                freq[0]=110; freq[1]=320; freq[2]=1300; freq[3]=4700; freq[4]=15000;
-                gain[0]=0; gain[1]=-2.0f; gain[2]=0.6f; gain[3]=1.7f; gain[4]=1.1f;
-                type[0]=1; type[1]=3; type[2]=3; type[3]=3; type[4]=5;
-                drive=2.0f; satMix=1.0f;
-                if (variation % 3 == 0) { width=0.30f; }
-                else if (variation % 3 == 1) { width=0.45f; panL=-0.30f; panR=0.20f; }
-                else { width=0.55f; if (variation % 2 == 0) panL=-0.40f; else panR=0.40f; }
-                break;
+            freq[0]=25; freq[1]=58; freq[2]=160; freq[3]=650; freq[4]=5200;
+            gain[0]=0; gain[1]=1.8f; gain[2]=-2.2f; gain[3]=-1.8f; gain[4]=0;
+            type[0]=0; type[1]=2; type[2]=3; type[3]=3; type[4]=6;
+            width=1.0f; drive=8.0f; satMix=1.0f;
         }
+        else // Melody: mid/high clarity and three guide-based stereo profiles.
+        {
+            freq[0]=120; freq[1]=340; freq[2]=1400; freq[3]=4800; freq[4]=15500;
+            gain[0]=0; gain[1]=-2.4f; gain[2]=0.8f; gain[3]=2.0f; gain[4]=1.3f;
+            type[0]=1; type[1]=3; type[2]=3; type[3]=3; type[4]=5;
+            drive=2.0f; satMix=1.0f;
+            if (variation % 3 == 0) width=0.30f;
+            else if (variation % 3 == 1) { width=0.45f; panL=-0.30f; panR=0.20f; }
+            else { width=0.55f; if (variation % 2 == 0) panL=-0.40f; else panR=0.40f; }
+        }
+        const float freqSpread[10] { 0.70f, 0.78f, 0.86f, 0.93f, 1.0f, 1.08f, 1.17f, 1.28f, 1.40f, 1.55f };
+        const float eqSpread[10] { -2.5f, -2.0f, -1.4f, -0.8f, 0.0f, 0.8f, 1.4f, 2.0f, 2.6f, 3.2f };
+        for (int band = 0; band < 5; ++band)
+        {
+            freq[band] *= std::pow(freqSpread[variation], band == 0 ? 0.5f : (band == 4 ? 0.7f : 1.0f));
+            if (band > 0) gain[band] += eqSpread[variation] * (band == 2 ? -0.55f : 0.65f);
+        }
+        threshold += centered * 2.0f;
+        attack *= (variation % 2 == 0 ? 0.8f : 1.25f);
+        release *= (variation % 2 == 0 ? 0.85f : 1.20f);
+        drive += centered * (category == 6 ? 1.0f : 0.5f);
     }
 
-    // Ten related but distinct voicings per role. Variation is intentionally
-    // modest: it changes cutoff, bell centers, Q and gain, not the role's intent.
-    const float centered = v - 0.5f;
     for (int band = 0; band < 5; ++band)
     {
-        const float freqSpread = (band == 0 ? 0.12f : band == 4 ? 0.10f : 0.08f);
-        const float fScale = std::pow(2.0f, centered * freqSpread);
-        const float gSpread = (band == 0 ? 0.0f : band == 4 ? 0.45f : 0.75f);
-        const float qScale = 1.0f + centered * (band == 2 ? 0.18f : 0.10f);
-        set("eqBandFreq" + juce::String(band), freq[band] * fScale);
-        set("eqBandGain" + juce::String(band), gain[band] + centered * gSpread);
-        set("eqBandQ" + juce::String(band), q[band] * qScale);
+        set("eqBandFreq" + juce::String(band), freq[band]);
+        set("eqBandGain" + juce::String(band), gain[band]);
+        set("eqBandQ" + juce::String(band), q[band]);
         set("eqBandType" + juce::String(band), (float)type[band]);
         set("eqBandDynamic" + juce::String(band), 0.0f);
     }
 
-    // Keep the requested compressor/limiter character while varying each preset
-    // slightly. Input gain is kept at +3 dB per the reference limiter chain;
-    // Utility adds +6 dB ahead of peak protection, not after the limiter.
-    const float presetVariation = centered;
-    set("threshold", threshold + presetVariation * 0.8f);
-    set("ratio", ratio + presetVariation * 0.20f);
-    set("attack", attack * (1.0f + presetVariation * 0.10f));
-    set("release", release * (1.0f + presetVariation * 0.12f));
-    set("drive", drive + presetVariation * (drive >= 7.5f ? 0.50f : 0.20f));
-    set("tone", tone);
-    set("satMix", satMix);
+    set("threshold", threshold); set("ratio", ratio);
+    set("attack", attack); set("release", release);
+    set("drive", drive); set("tone", tone); set("satMix", satMix);
     set("width", width); set("leftPan", panL); set("rightPan", panR);
     set("inputGain", input); set("ceiling", ceiling);
     set("limitRelease", limiterRelease); set("transient", transient);
-    set("utilityGain", 6.0f);
+    set("utilityGain", utility);
+    set("drumDrive", drumDrive); set("drumDamp", drumDamp);
+    set("drumBoom", drumBoom); set("drumFreq", drumFreq);
     set("pan", 0.0f); set("monoFreq", 120.0f); set("haasMs", 0.0f);
 
     const auto& names = beat ? beatPresets : vocalPresets;
-    status.setText(names[safeId-1] + " LOADED — CHECK GAIN REDUCTION & SOURCE LEVEL",
+    status.setText(names[safeId-1] + " LOADED — LISTEN & ADJUST TO SOURCE",
                    juce::dontSendNotification);
 }
 
@@ -668,9 +764,9 @@ void HFXAudioProcessorEditor::paint(juce::Graphics& g)
     g.setColour(HFXColours::panel); g.fillRoundedRectangle(main.withTrimmedTop(90.0f), 12.0f);
     g.setColour(HFXColours::grid); g.drawRoundedRectangle(main.withTrimmedTop(90.0f), 12.0f, 1.0f);
 
-    const juce::String titles[] { "EQ  /  PRECISION FREQUENCY SHAPING", "COMPRESSOR  /  DYNAMIC CONTROL", "SATURATOR  /  HARMONIC COLOR", "PAN & WIDTH  /  STEREO FIELD", "LIMITER  /  PEAK CONTROL", "UTILITY  /  OUTPUT GAIN" };
+    const juce::String titles[] { "EQ  /  PRECISION FREQUENCY SHAPING", "COMPRESSOR  /  DYNAMIC CONTROL", "SATURATOR  /  HARMONIC COLOR", "PAN & WIDTH  /  STEREO FIELD", "LIMITER  /  PEAK CONTROL", "UTILITY  /  OUTPUT GAIN", "DRUM BUS  /  DRIVE, DAMP & LOW-END BOOM" };
     g.setColour(HFXColours::orange); g.setFont(juce::Font(12.0f, juce::Font::bold));
-    g.drawText(titles[activeTab], 32, 155, 600, 22, juce::Justification::left);
+    g.drawText(titles[activeTab], 32, 155, 760, 22, juce::Justification::left);
 
     // Soft multi-pass text glow for the HFX / HF identity.
     g.setFont(juce::Font(42.0f, juce::Font::bold));
@@ -700,15 +796,15 @@ void HFXAudioProcessorEditor::resized()
     presetBox.setBounds(getWidth() - 510, 58, 310, 32);
     autoMix.setBounds(getWidth() - 148, 18, 128, 36);
     const int tabY = 91, tabHeight = 38, tabGap = 5;
-    const int tabWidth = (getWidth() - 40 - tabGap * 5) / 6;
+    const int tabWidth = (getWidth() - 40 - tabGap * 6) / 7;
     for (int i = 0; i < panelModeCount; ++i)
         tabs[(size_t)i].setBounds(20 + i * (tabWidth + tabGap), tabY, tabWidth, tabHeight);
 
     const int graphHeight = 320;
     spectrumView.setBounds(30, 185, getWidth() - 130, graphHeight);
-    spectrumView.setVisible(activeTab != 5);
+    spectrumView.setVisible(activeTab != 5 && activeTab != 6);
     const int graphBottom = 185 + graphHeight;
-    const int utilityY = activeTab == 5 ? getHeight() - 112 : graphBottom + 8;
+    const int utilityY = (activeTab == 5 || activeTab == 6) ? getHeight() - 112 : graphBottom + 8;
     bypass.setBounds(30, utilityY, 82, 22);
     eqSoloButton.setBounds(120, utilityY, 142, 22);
     eqSoloButton.setVisible(activeTab == 0);
@@ -731,7 +827,7 @@ void HFXAudioProcessorEditor::resized()
             continue;
         }
         const int x = activeTab == 5 ? (getWidth() - 300) / 2 : startX + i * cell;
-        const int y = activeTab == 5 ? 280 : graphBottom + 48;
+        const int y = activeTab == 5 ? 280 : (activeTab == 6 ? 350 : graphBottom + 48);
         knobLabels[(size_t)i].setBounds(x, y, activeTab == 5 ? 300 : cell - 8, activeTab == 5 ? 24 : 16);
         knobs[(size_t)i].setBounds(activeTab == 5 ? (getWidth() - 190) / 2 : x + (cell - 84) / 2,
                                    y + (activeTab == 5 ? 30 : 14),

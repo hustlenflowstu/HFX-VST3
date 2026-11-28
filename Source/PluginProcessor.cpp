@@ -149,6 +149,10 @@ HFXAudioProcessor::HFXAudioProcessor()
     pLimitRelease = apvts.getRawParameterValue("limitRelease");
     pTrackMode = apvts.getRawParameterValue("trackMode");
     pStemRole = apvts.getRawParameterValue("stemRole");
+    pDrumDrive = apvts.getRawParameterValue("drumDrive");
+    pDrumDamp = apvts.getRawParameterValue("drumDamp");
+    pDrumBoom = apvts.getRawParameterValue("drumBoom");
+    pDrumFreq = apvts.getRawParameterValue("drumFreq");
     pBypass = apvts.getRawParameterValue("bypass");
 }
 
@@ -203,6 +207,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout HFXAudioProcessor::makeParam
     f("utilityGain", "Utility Gain", { -24.0f, 24.0f, 0.01f }, 0.0f, "dB");
     f("ceiling", "Ceiling", { -12.0f, 0.0f, 0.1f }, -1.0f, "dB");
     f("limitRelease", "Limiter Release", { 10.0f, 500.0f, 1.0f }, 80.0f, "ms");
+    // Drum Bus controls are only active for Kick, Snare, Percussion, Hats and EFX.
+    f("drumDrive", "Drum Bus Drive", { 0.0f, 20.0f, 0.1f }, 3.0f, "%");
+    f("drumDamp", "Drum Bus Damp", { 1500.0f, 20000.0f, 10.0f, 0.35f }, 9200.0f, "Hz");
+    f("drumBoom", "Drum Bus Boom", { 0.0f, 100.0f, 0.1f }, 0.0f, "%");
+    f("drumFreq", "Drum Bus Boom Frequency", { 30.0f, 120.0f, 0.1f }, 50.0f, "Hz");
     params.push_back(std::make_unique<AudioParameterChoice>(
         ParameterID { "trackMode", 1 }, "Track Mode",
         StringArray { "Vocal", "Beat" }, 0));
@@ -221,6 +230,8 @@ void HFXAudioProcessor::prepareToPlay(double sr, int)
     for (auto& channel : eq)
         for (auto& band : channel)
             for (auto& filter : band) filter.reset();
+    for (auto& filter : drumDampFilters) filter.reset();
+    for (auto& filter : drumBoomFilters) filter.reset();
     compEnvelope = { 0.0f, 0.0f };
     limiterGain = { 1.0f, 1.0f };
     lowState = { 0.0f, 0.0f };
@@ -263,8 +274,8 @@ bool HFXAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 
 void HFXAudioProcessor::updateParameters()
 {
-    // Five parametric bands with selectable filter shapes. Presets use the
-    // hidden legacy filter-type parameters for practical HP/LP/shelf shaping.
+    // Five parametric EQ bands. Factory presets use HP/LP, shelf and bell shapes
+    // to match the supplied stem-mixing references.
     for (int ch = 0; ch < 2; ++ch)
         for (int band = 0; band < 5; ++band)
         {
@@ -392,6 +403,23 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
     const float panLeft = std::sqrt(2.0f) * std::cos((balance + 1.0f) * 0.25f * juce::MathConstants<float>::pi);
     const float panRight = std::sqrt(2.0f) * std::sin((balance + 1.0f) * 0.25f * juce::MathConstants<float>::pi);
 
+    // Drum Bus mode is deliberately limited to the six percussive stem roles.
+    // 808/Bass (role 6) and Melody (role 7) retain the full HFX dynamics chain.
+    const bool drumBusActive = pTrackMode->load(std::memory_order_relaxed) >= 0.5f
+        && pStemRole->load(std::memory_order_relaxed) < 5.5f;
+    if (drumBusActive)
+    {
+        const float dampHz = pDrumDamp != nullptr ? pDrumDamp->load(std::memory_order_relaxed) : 9200.0f;
+        const float boomPct = pDrumBoom != nullptr ? pDrumBoom->load(std::memory_order_relaxed) : 0.0f;
+        const float boomDb = boomPct * 0.10f;
+        const float boomHz = pDrumFreq != nullptr ? pDrumFreq->load(std::memory_order_relaxed) : 50.0f;
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            drumDampFilters[(size_t)ch].setFilter(sampleRateHz, dampHz, 0.707f, 0.0f, 6);
+            drumBoomFilters[(size_t)ch].setFilter(sampleRateHz, boomHz, 0.90f, boomDb, 3);
+        }
+    }
+
     float maxCompReduction = 0.0f;
     float maxLimitReduction = 0.0f;
 
@@ -418,68 +446,81 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
             }
         }
 
-        // Stereo-linked RMS compressor detector: both channels receive the same gain.
-        const float detectorPower = right != nullptr
-            ? 0.5f * (xL * xL + xR * xR) : xL * xL;
-        const float compCoeff = detectorPower > compEnvelope[0] ? attackCoeff : releaseCoeff;
-        compEnvelope[0] = compCoeff * compEnvelope[0] + (1.0f - compCoeff) * detectorPower;
-        compEnvelope[1] = compEnvelope[0];
-        const float levelDb = juce::Decibels::gainToDecibels(std::sqrt(juce::jmax(1.0e-12f, compEnvelope[0])), -120.0f);
-        const float overDb = levelDb - thresholdDb;
-        constexpr float kneeDb = 6.0f;
-        float reductionDb = 0.0f;
-        if (overDb > -0.5f * kneeDb && overDb < 0.5f * kneeDb)
+        if (drumBusActive)
         {
-            const float softened = overDb + 0.5f * kneeDb;
-            reductionDb = (1.0f / ratio - 1.0f) * softened * softened / (2.0f * kneeDb);
+            // Drum Bus: soft drive, high-frequency damping and a tunable low-frequency boom shelf.
+            // No compressor, conventional saturator, Utility gain or limiter is inserted here.
+            const float drivePct = pDrumDrive != nullptr ? pDrumDrive->load(std::memory_order_relaxed) : 3.0f;
+            const float driveAmount = 1.0f + drivePct * 0.045f;
+            const float driveNorm = juce::jmax(0.001f, std::tanh(driveAmount));
+            xL = std::tanh(xL * driveAmount) / driveNorm;
+            if (right != nullptr) xR = std::tanh(xR * driveAmount) / driveNorm;
+            xL = drumDampFilters[0].process(xL);
+            if (right != nullptr) xR = drumDampFilters[1].process(xR);
+            xL = drumBoomFilters[0].process(xL);
+            if (right != nullptr) xR = drumBoomFilters[1].process(xR);
         }
-        else if (overDb >= 0.5f * kneeDb)
-            reductionDb = (1.0f / ratio - 1.0f) * overDb;
-        const float compGain = juce::Decibels::decibelsToGain(reductionDb);
-        maxCompReduction = juce::jmax(maxCompReduction, -reductionDb);
-        xL *= compGain;
-        if (right != nullptr) xR *= compGain;
-
-        // Transient control adds a bounded attack component before saturation.
-        transientEnvelope[0] = transientCoeff * transientEnvelope[0] + (1.0f - transientCoeff) * xL;
-        const float transientL = xL - transientEnvelope[0];
-        xL += transientAmount * transientL;
-        if (right != nullptr)
+        else
         {
-            transientEnvelope[1] = transientCoeff * transientEnvelope[1] + (1.0f - transientCoeff) * xR;
-            xR += transientAmount * (xR - transientEnvelope[1]);
+            // Full vocal / 808 / melody chain: linked compression, transient control,
+            // saturation, Utility gain and peak limiting.
+            const float detectorPower = right != nullptr
+                ? 0.5f * (xL * xL + xR * xR) : xL * xL;
+            const float compCoeff = detectorPower > compEnvelope[0] ? attackCoeff : releaseCoeff;
+            compEnvelope[0] = compCoeff * compEnvelope[0] + (1.0f - compCoeff) * detectorPower;
+            compEnvelope[1] = compEnvelope[0];
+            const float levelDb = juce::Decibels::gainToDecibels(std::sqrt(juce::jmax(1.0e-12f, compEnvelope[0])), -120.0f);
+            const float overDb = levelDb - thresholdDb;
+            constexpr float kneeDb = 6.0f;
+            float reductionDb = 0.0f;
+            if (overDb > -0.5f * kneeDb && overDb < 0.5f * kneeDb)
+            {
+                const float softened = overDb + 0.5f * kneeDb;
+                reductionDb = (1.0f / ratio - 1.0f) * softened * softened / (2.0f * kneeDb);
+            }
+            else if (overDb >= 0.5f * kneeDb)
+                reductionDb = (1.0f / ratio - 1.0f) * overDb;
+            const float compGain = juce::Decibels::decibelsToGain(reductionDb);
+            maxCompReduction = juce::jmax(maxCompReduction, -reductionDb);
+            xL *= compGain;
+            if (right != nullptr) xR *= compGain;
+
+            transientEnvelope[0] = transientCoeff * transientEnvelope[0] + (1.0f - transientCoeff) * xL;
+            xL += transientAmount * (xL - transientEnvelope[0]);
+            if (right != nullptr)
+            {
+                transientEnvelope[1] = transientCoeff * transientEnvelope[1] + (1.0f - transientCoeff) * xR;
+                xR += transientAmount * (xR - transientEnvelope[1]);
+            }
+
+            auto saturate = [&](float x, int channel)
+            {
+                toneLowState[(size_t)channel] = toneCoeff * toneLowState[(size_t)channel] + (1.0f - toneCoeff) * x;
+                const float low = toneLowState[(size_t)channel];
+                const float high = x - low;
+                const float tilted = low * (1.0f - tone * 0.35f) + high * (1.0f + tone * 0.35f);
+                const float norm = juce::jmax(0.001f, std::tanh(drive));
+                const float wet = std::tanh(tilted * drive) / norm;
+                return x * (1.0f - satMix) + wet * satMix;
+            };
+            xL = saturate(xL, 0);
+            if (right != nullptr) xR = saturate(xR, 1);
+
+            const float utilityGainDb = pUtilityGain != nullptr ? pUtilityGain->load(std::memory_order_relaxed) : 0.0f;
+            const float utilityLinear = juce::Decibels::decibelsToGain(utilityGainDb);
+            xL *= utilityLinear;
+            if (right != nullptr) xR *= utilityLinear;
+
+            const float peak = right != nullptr ? juce::jmax(std::abs(xL), std::abs(xR)) : std::abs(xL);
+            const float targetGain = peak > ceiling ? ceiling / juce::jmax(1.0e-9f, peak) : 1.0f;
+            if (targetGain < limiterGain[0]) limiterGain[0] = targetGain;
+            else limiterGain[0] = limiterReleaseCoeff * limiterGain[0] + (1.0f - limiterReleaseCoeff) * targetGain;
+            limiterGain[1] = limiterGain[0];
+            const float limitGR = -juce::Decibels::gainToDecibels(limiterGain[0], -90.0f);
+            maxLimitReduction = juce::jmax(maxLimitReduction, limitGR);
+            xL *= limiterGain[0];
+            if (right != nullptr) xR *= limiterGain[0];
         }
-
-        auto saturate = [&](float x, int channel)
-        {
-            toneLowState[(size_t)channel] = toneCoeff * toneLowState[(size_t)channel] + (1.0f - toneCoeff) * x;
-            const float low = toneLowState[(size_t)channel];
-            const float high = x - low;
-            const float tilted = low * (1.0f - tone * 0.35f) + high * (1.0f + tone * 0.35f);
-            const float norm = juce::jmax(0.001f, std::tanh(drive));
-            const float wet = std::tanh(tilted * drive) / norm;
-            return x * (1.0f - satMix) + wet * satMix;
-        };
-        xL = saturate(xL, 0);
-        if (right != nullptr) xR = saturate(xR, 1);
-
-        // Utility is the final gain stage before peak protection so its gain
-        // remains controlled by the downstream limiter ceiling.
-        const float utilityGainDb = pUtilityGain != nullptr ? pUtilityGain->load(std::memory_order_relaxed) : 0.0f;
-        const float utilityLinear = juce::Decibels::decibelsToGain(utilityGainDb);
-        xL *= utilityLinear;
-        if (right != nullptr) xR *= utilityLinear;
-
-        // Linked sample-peak limiter with immediate attack and smoothed release.
-        const float peak = right != nullptr ? juce::jmax(std::abs(xL), std::abs(xR)) : std::abs(xL);
-        const float targetGain = peak > ceiling ? ceiling / juce::jmax(1.0e-9f, peak) : 1.0f;
-        if (targetGain < limiterGain[0]) limiterGain[0] = targetGain;
-        else limiterGain[0] = limiterReleaseCoeff * limiterGain[0] + (1.0f - limiterReleaseCoeff) * targetGain;
-        limiterGain[1] = limiterGain[0];
-        const float limitGR = -juce::Decibels::gainToDecibels(limiterGain[0], -90.0f);
-        maxLimitReduction = juce::jmax(maxLimitReduction, limitGR);
-        xL *= limiterGain[0];
-        if (right != nullptr) xR *= limiterGain[0];
 
         if (right != nullptr)
         {
@@ -495,8 +536,8 @@ void HFXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mid
         if (right != nullptr) right[n] = xR;
     }
 
-    compressorGR.store(maxCompReduction, std::memory_order_relaxed);
-    limiterGR.store(maxLimitReduction, std::memory_order_relaxed);
+    compressorGR.store(drumBusActive ? 0.0f : maxCompReduction, std::memory_order_relaxed);
+    limiterGR.store(drumBusActive ? 0.0f : maxLimitReduction, std::memory_order_relaxed);
     captureVisualsAndMeters();
     pushSpectrum(buffer); // Analyze processed output so Width and Pan changes are visible.
 }

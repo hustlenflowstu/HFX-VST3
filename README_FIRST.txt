@@ -25,9 +25,13 @@ EASIEST ROUTE TO YOUR HFX INSTALLER
 INTERNET IS REQUIRED for the first build because CMake downloads JUCE 8.0.6.
 
 WHAT IS IMPLEMENTED IN THIS SOURCE PROJECT
-- Five-tab HFX interface with dark/orange custom LookAndFeel.
-- Parametric EQ, compressor, soft saturation, M/S width, low-frequency monoing,
-  pan, Haas delay and sample-peak limiting.
+- Seven-tab HFX interface with dark/orange custom LookAndFeel; Drum Bus is shown only for percussive beat stems.
+- Five-band parametric EQ with preset-driven HP/LP/shelf/bell shaping, compressor,
+  soft saturation, M/S width, left/right pan, Utility gain and sample-peak limiting.
+- Dedicated Drum Bus tab for Kick, Snare, Percussion, Closed Hat, Open Hat and EFX.
+  Drum Bus provides Drive, Damp, Boom and Boom Frequency controls. These six roles
+  bypass Compressor, Saturator, Utility and Limiter; 808/Bass and Melody retain
+  the full dynamics/saturation/output chain.
 - Beat/Vocal track mode.
 - Factory starting presets.
 - Four-second RMS/peak/crest-factor Auto-Mix recommendations.
@@ -56,3 +60,22 @@ HFX UPDATE NOTES - UTILITY + PRESET REVISION
 - 808/Bass and Melody now have separate preset groups.
 - Presets use modest variations while keeping their requested instrument/voice tonal direction.
 - Presets are starting points. Source recording level, arrangement, phase, and playback level still require listening and adjustment.
+
+
+HFX UPDATE NOTES - DRUM BUS MIXING WORKFLOW
+- Added Drum Bus as a seventh tab. It is available only in Beat mode for Kick,
+  Snare, Percussion, Closed Hat, Open Hat and EFX.
+- Drum Bus controls: Drive (%), Damp (low-pass cutoff in Hz), Boom (%) and
+  Boom Frequency (Hz).
+- For those six percussive roles, the DSP path is EQ -> Drum Bus -> Pan/Width.
+  Compressor, Saturator, Utility and Limiter are bypassed by design.
+- 808/Bass and Melody do not show Drum Bus; they retain EQ -> Compressor ->
+  Saturator -> Utility -> Limiter -> Pan/Width.
+- Each of the 60 percussive presets has a more distinct EQ curve and Drum Bus
+  setting set. Their frequency anchors follow the supplied Kick, Snare, Percussion,
+  Closed Hat and Open Hat guide screenshots; pan/width follows the same references.
+- Drum Bus intentionally has no limiter. Watch peak levels and lower the source
+  or Drive if the signal clips. No fixed preset can guarantee the same result
+  across every recording or sample.
+- New APVTS parameter IDs: drumDrive, drumDamp, drumBoom and drumFreq. Existing
+  parameter IDs were retained for session compatibility.

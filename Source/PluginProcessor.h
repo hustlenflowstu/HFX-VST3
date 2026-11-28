@@ -80,6 +80,8 @@ private:
     };
     std::array<std::array<std::array<Biquad, 4>, 5>, 2> eq;
     std::array<Biquad, 2> eqSoloFilters;
+    std::array<Biquad, 2> drumDampFilters;
+    std::array<Biquad, 2> drumBoomFilters;
     std::atomic<int> eqSoloBand { -1 };
     std::array<std::atomic<float>*, 5> pEqBandFreq {};
     std::array<std::atomic<float>*, 5> pEqBandGain {};
@@ -123,6 +125,10 @@ private:
     std::atomic<float>* pLimitRelease = nullptr;
     std::atomic<float>* pTrackMode = nullptr;
     std::atomic<float>* pStemRole = nullptr;
+    std::atomic<float>* pDrumDrive = nullptr;
+    std::atomic<float>* pDrumDamp = nullptr;
+    std::atomic<float>* pDrumBoom = nullptr;
+    std::atomic<float>* pDrumFreq = nullptr;
     std::atomic<float>* pBypass = nullptr;
 
     std::atomic<float> leftPeak { -90.0f }, rightPeak { -90.0f }, outputRms { -90.0f };
